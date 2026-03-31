@@ -2,29 +2,21 @@
 
 import { useState } from 'react'
 import {
-  Search,
-  IndianRupee,
-  AlertTriangle,
-  Send,
-  Check,
-  Smartphone,
-  Banknote,
-  CreditCard,
-  ArrowLeftRight,
+  Search, IndianRupee, AlertTriangle, Send, Check,
+  Smartphone, Banknote, CreditCard, ArrowLeftRight,
+  Calendar, Shield, FastForward,
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
-import { useQuery } from '@/lib/hooks/use-query'
-import { useMutation } from '@/lib/hooks/use-query'
-import { getInvoices, recordPayment } from '@/lib/services/billing'
+import { useQuery, useMutation } from '@/lib/hooks/use-query'
+import { getInvoices, recordPayment, recordDepositPayment, recordAdvanceRent, getPaymentsForOccupancy } from '@/lib/services/billing'
+import { getActiveOccupancies } from '@/lib/services/tenants'
 import { ListSkeleton } from '@/components/loading-skeleton'
 
 function formatINR(amount: number): string {
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    maximumFractionDigits: 0,
-  }).format(amount)
+  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount)
 }
+
+type PaymentTab = 'rent' | 'deposit' | 'advance'
 
 const paymentMethods = [
   { key: 'upi', label: 'UPI', icon: Smartphone },
@@ -35,64 +27,104 @@ const paymentMethods = [
 
 export default function CollectRent() {
   const { orgId } = useAuth()
+  const [tab, setTab] = useState<PaymentTab>('rent')
   const [search, setSearch] = useState('')
   const [selectedInvoice, setSelectedInvoice] = useState<string | null>(null)
+  const [selectedOccupancy, setSelectedOccupancy] = useState<string | null>(null)
   const [paymentMethod, setPaymentMethod] = useState('upi')
   const [transactionRef, setTransactionRef] = useState('')
+  const [customAmount, setCustomAmount] = useState('')
+  const [advanceMonths, setAdvanceMonths] = useState(1)
   const [confirmed, setConfirmed] = useState(false)
+  const [paying, setPaying] = useState(false)
+  const [error, setError] = useState('')
 
-  const { data: invoices, loading, refetch } = useQuery(
-    () => getInvoices(orgId!),
-    [orgId]
+  const { data: invoices, loading: invLoading, refetch: refetchInvoices } = useQuery(
+    () => getInvoices(orgId!), [orgId]
+  )
+  const { data: occupancies, loading: occLoading } = useQuery(
+    () => getActiveOccupancies(orgId!), [orgId]
   )
 
-  const { mutate: doRecordPayment, loading: paying } = useMutation(
-    (invoiceId: string, occupancyId: string, amount: number, method: string, ref?: string) =>
-      recordPayment(orgId!, invoiceId, occupancyId, amount, method, ref)
-  )
+  if (!orgId || invLoading || occLoading) return <ListSkeleton rows={5} />
 
-  if (!orgId || loading) {
-    return <ListSkeleton rows={5} />
-  }
-
-  // Get unpaid invoices with joined data
+  // Build unpaid invoices list
   const unpaidInvoices = (invoices || [])
     .filter((inv: any) => inv.status !== 'paid')
-    .map((inv: any) => {
-      const occ = inv.occupancy
-      const tenant = occ?.tenant
-      const bed = occ?.bed
-      const room = bed?.room
-      return { invoice: inv, tenant, room, bed, occupancy: occ }
-    })
+    .map((inv: any) => ({
+      invoice: inv,
+      tenant: inv.occupancy?.tenant,
+      room: inv.occupancy?.bed?.room,
+      bed: inv.occupancy?.bed,
+      occupancy: inv.occupancy,
+    }))
 
-  const filtered = search
+  // Build active tenant list for deposit/advance
+  const activeTenants = (occupancies || []).map((occ: any) => ({
+    occupancy: occ,
+    tenant: occ.tenant,
+    room: occ.bed?.room,
+    bed: occ.bed,
+  }))
+
+  const filteredInvoices = search
     ? unpaidInvoices.filter(({ tenant, room }: any) =>
         tenant?.full_name?.toLowerCase().includes(search.toLowerCase()) ||
-        room?.name?.toLowerCase().includes(search.toLowerCase())
-      )
+        room?.name?.toLowerCase().includes(search.toLowerCase()))
     : unpaidInvoices
 
-  const selected = selectedInvoice
-    ? unpaidInvoices.find(({ invoice }: any) => invoice.id === selectedInvoice)
-    : null
+  const filteredTenants = search
+    ? activeTenants.filter(({ tenant, room }: any) =>
+        tenant?.full_name?.toLowerCase().includes(search.toLowerCase()) ||
+        room?.name?.toLowerCase().includes(search.toLowerCase()))
+    : activeTenants
 
-  const handleConfirmPayment = async () => {
-    if (!selected) return
-    const result = await doRecordPayment(
-      selected.invoice.id,
-      selected.invoice.occupancy_id,
-      selected.invoice.total_amount,
-      paymentMethod,
-      transactionRef || undefined
-    )
-    if (result !== null) {
+  const selectedInv = selectedInvoice ? unpaidInvoices.find(({ invoice }: any) => invoice.id === selectedInvoice) : null
+  const selectedTenant = selectedOccupancy ? activeTenants.find(({ occupancy }: any) => occupancy.id === selectedOccupancy) : null
+
+  const handlePayRent = async () => {
+    if (!selectedInv || !orgId) return
+    setPaying(true)
+    setError('')
+    try {
+      const amount = customAmount ? Number(customAmount) : Number(selectedInv.invoice.total_amount)
+      await recordPayment(
+        orgId, selectedInv.invoice.id, selectedInv.invoice.occupancy_id,
+        amount, paymentMethod, 'rent', transactionRef || undefined
+      )
       setConfirmed(true)
-      refetch()
-    }
+      refetchInvoices()
+    } catch (err: any) {
+      setError(err.message || 'Payment failed')
+    } finally { setPaying(false) }
   }
 
-  if (confirmed && selected) {
+  const handlePayDeposit = async () => {
+    if (!selectedTenant || !orgId || !customAmount) return
+    setPaying(true)
+    setError('')
+    try {
+      await recordDepositPayment(orgId, selectedTenant.occupancy.id, Number(customAmount), paymentMethod, transactionRef || undefined)
+      setConfirmed(true)
+    } catch (err: any) {
+      setError(err.message || 'Payment failed')
+    } finally { setPaying(false) }
+  }
+
+  const handlePayAdvance = async () => {
+    if (!selectedTenant || !orgId) return
+    setPaying(true)
+    setError('')
+    try {
+      const amount = Number(selectedTenant.occupancy.monthly_rent) * advanceMonths
+      await recordAdvanceRent(orgId, selectedTenant.occupancy.id, amount, advanceMonths, paymentMethod, transactionRef || undefined)
+      setConfirmed(true)
+    } catch (err: any) {
+      setError(err.message || 'Payment failed')
+    } finally { setPaying(false) }
+  }
+
+  if (confirmed) {
     return (
       <div className="text-center py-10">
         <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-4">
@@ -100,22 +132,12 @@ export default function CollectRent() {
         </div>
         <h3 className="text-lg font-bold text-slate-900">Payment Recorded</h3>
         <p className="text-sm text-slate-500 mt-1">
-          {formatINR(selected.invoice.total_amount)} received from {selected.tenant?.full_name}
+          {tab === 'rent' ? 'Rent payment' : tab === 'deposit' ? 'Deposit' : 'Advance rent'} has been recorded successfully
         </p>
-        <div className="bg-emerald-50 rounded-xl p-4 mt-4 max-w-xs mx-auto border border-emerald-100">
-          <p className="text-xs text-emerald-600 font-semibold mb-2">Receipt generated</p>
-          <p className="text-[11px] text-emerald-700">{selected.invoice.invoice_number}</p>
-          <div className="flex gap-2 mt-3">
-            <button className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-emerald-600 text-white font-semibold rounded-xl text-xs hover:bg-emerald-700 active:scale-[0.98] transition-all">
-              <Send className="w-3 h-3" />
-              WhatsApp Receipt
-            </button>
-          </div>
-        </div>
         <div className="flex gap-2 mt-6 max-w-xs mx-auto">
           <button
-            onClick={() => { setConfirmed(false); setSelectedInvoice(null); setTransactionRef('') }}
-            className="flex-1 py-2.5 bg-primary text-white font-semibold rounded-xl text-sm text-center hover:bg-primary-dark active:scale-[0.98] transition-all"
+            onClick={() => { setConfirmed(false); setSelectedInvoice(null); setSelectedOccupancy(null); setCustomAmount(''); setTransactionRef('') }}
+            className="flex-1 py-2.5 bg-primary text-white font-semibold rounded-xl text-sm hover:bg-primary-dark active:scale-[0.98] transition-all"
           >
             Collect Another
           </button>
@@ -126,156 +148,258 @@ export default function CollectRent() {
 
   return (
     <div>
-      {!selectedInvoice ? (
-        <>
-          <div className="bg-amber-50 rounded-xl p-3 flex items-center gap-2 mb-4 border border-amber-100">
-            <IndianRupee className="w-5 h-5 text-amber-600" />
-            <p className="text-xs font-medium text-amber-700">
-              {unpaidInvoices.length} tenant{unpaidInvoices.length !== 1 ? 's' : ''} with pending rent this cycle
-            </p>
-          </div>
+      {/* Tab selector */}
+      <div className="flex gap-1 bg-slate-100 rounded-xl p-1 mb-4">
+        {[
+          { key: 'rent' as const, label: 'Rent', icon: IndianRupee },
+          { key: 'deposit' as const, label: 'Deposit', icon: Shield },
+          { key: 'advance' as const, label: 'Advance', icon: FastForward },
+        ].map((t) => {
+          const Icon = t.icon
+          return (
+            <button
+              key={t.key}
+              onClick={() => { setTab(t.key); setSelectedInvoice(null); setSelectedOccupancy(null); setCustomAmount('') }}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold transition-all ${
+                tab === t.key ? 'bg-white shadow-sm text-primary' : 'text-slate-500'
+              }`}
+            >
+              <Icon className="w-3.5 h-3.5" />
+              {t.label}
+            </button>
+          )
+        })}
+      </div>
 
-          <div className="relative mb-4">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Search tenant..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-10 pr-4 py-3 bg-white rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-            />
-          </div>
-
-          <div className="space-y-2">
-            {filtered.map(({ invoice, tenant, room, bed }: any) => {
-              const isOverdue = invoice.status === 'overdue'
-              return (
-                <button
-                  key={invoice.id}
-                  onClick={() => setSelectedInvoice(invoice.id)}
-                  className="w-full flex items-center gap-3 bg-white rounded-xl p-3.5 border border-slate-100 shadow-sm hover:shadow-md active:bg-slate-50 transition-all text-left"
-                >
-                  <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                    <span className="text-xs font-bold text-primary">
-                      {tenant?.full_name?.split(' ').map((n: string) => n[0]).join('') || '?'}
-                    </span>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-semibold text-slate-900 truncate">{tenant?.full_name}</p>
-                      {isOverdue && (
-                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-red-50 text-[10px] font-semibold text-red-600 shrink-0">
-                          <AlertTriangle className="w-2.5 h-2.5" /> Overdue
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-[11px] text-slate-500 mt-0.5">
-                      {room?.name} - {bed?.bed_number} &middot; Due {invoice.due_date?.split('-')[2]}/{invoice.due_date?.split('-')[1]}
-                    </p>
-                  </div>
-                  <p className="text-sm font-bold text-slate-900 shrink-0">{formatINR(invoice.total_amount)}</p>
-                </button>
-              )
-            })}
-          </div>
-        </>
-      ) : selected ? (
-        <div>
-          <button
-            onClick={() => setSelectedInvoice(null)}
-            className="text-xs text-primary font-semibold mb-4 hover:underline"
-          >
-            &larr; Back to list
-          </button>
-
-          {/* Invoice summary */}
-          <div className="bg-white rounded-xl p-4 border border-slate-100 shadow-sm mb-4">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
-                <span className="text-base font-bold text-primary">
-                  {selected.tenant?.full_name?.split(' ').map((n: string) => n[0]).join('')}
-                </span>
-              </div>
-              <div>
-                <p className="text-base font-bold text-slate-900">{selected.tenant?.full_name}</p>
-                <p className="text-xs text-slate-500">{selected.room?.name} - {selected.bed?.bed_number}</p>
-              </div>
-            </div>
-
-            <div className="bg-slate-50 rounded-lg p-3 space-y-1.5">
-              <div className="flex justify-between text-sm">
-                <span className="text-slate-500">Base Rent</span>
-                <span className="font-medium">{formatINR(selected.invoice.base_amount)}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-slate-500">GST (18%)</span>
-                <span className="font-medium">{formatINR(selected.invoice.gst_amount)}</span>
-              </div>
-              <div className="border-t border-slate-200 pt-1.5 flex justify-between">
-                <span className="text-sm font-semibold text-slate-700">Total Due</span>
-                <span className="text-lg font-bold text-slate-900">{formatINR(selected.invoice.total_amount)}</span>
-              </div>
-            </div>
-
-            <p className="text-[10px] text-slate-400 mt-2 text-center">
-              Invoice {selected.invoice.invoice_number}
-            </p>
-          </div>
-
-          {/* Payment method */}
-          <div className="bg-white rounded-xl p-4 border border-slate-100 shadow-sm mb-4">
-            <h4 className="text-sm font-semibold text-slate-900 mb-3">Payment Method</h4>
-            <div className="grid grid-cols-2 gap-2">
-              {paymentMethods.map((method) => {
-                const Icon = method.icon
-                return (
-                  <button
-                    key={method.key}
-                    onClick={() => setPaymentMethod(method.key)}
-                    className={`flex items-center gap-2 px-3 py-3 rounded-xl border-2 transition-all ${
-                      paymentMethod === method.key
-                        ? 'border-primary bg-primary/5'
-                        : 'border-slate-200 hover:border-slate-300'
-                    }`}
-                  >
-                    <Icon className={`w-4 h-4 ${paymentMethod === method.key ? 'text-primary' : 'text-slate-400'}`} />
-                    <span className={`text-sm font-medium ${paymentMethod === method.key ? 'text-primary' : 'text-slate-600'}`}>
-                      {method.label}
-                    </span>
-                  </button>
-                )
-              })}
-            </div>
-
-            {paymentMethod !== 'cash' && (
-              <div className="mt-3">
-                <label className="text-xs font-semibold text-slate-600 mb-1 block">Transaction Reference</label>
-                <input
-                  type="text"
-                  placeholder={paymentMethod === 'upi' ? 'UPI Transaction ID' : 'Transaction reference'}
-                  value={transactionRef}
-                  onChange={(e) => setTransactionRef(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-                />
-              </div>
-            )}
-          </div>
-
-          {/* Confirm */}
-          <button
-            onClick={handleConfirmPayment}
-            disabled={paying}
-            className="w-full py-3.5 bg-emerald-600 text-white font-semibold rounded-xl text-sm hover:bg-emerald-700 active:scale-[0.98] transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-          >
-            <Check className="w-4 h-4" />
-            {paying ? 'Recording...' : `Record Payment of ${formatINR(selected.invoice.total_amount)}`}
-          </button>
-
-          <p className="text-[11px] text-slate-400 text-center mt-2">
-            A PDF receipt will be generated automatically
-          </p>
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-xl px-3 py-2 mb-3">
+          <p className="text-xs text-red-600 font-medium">{error}</p>
         </div>
-      ) : null}
+      )}
+
+      {/* Search */}
+      <div className="relative mb-4">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+        <input
+          type="text"
+          placeholder="Search tenant..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="w-full pl-10 pr-4 py-3 bg-white rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+        />
+      </div>
+
+      {/* ── RENT TAB ── */}
+      {tab === 'rent' && !selectedInvoice && (
+        <div className="space-y-2">
+          {unpaidInvoices.length === 0 ? (
+            <div className="text-center py-8"><p className="text-sm text-slate-400">No pending invoices</p></div>
+          ) : (
+            filteredInvoices.map(({ invoice, tenant, room, bed }: any) => (
+              <button
+                key={invoice.id}
+                onClick={() => setSelectedInvoice(invoice.id)}
+                className="w-full flex items-center gap-3 bg-white rounded-xl p-3.5 border border-slate-100 shadow-sm hover:shadow-md text-left"
+              >
+                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                  <span className="text-xs font-bold text-primary">{tenant?.full_name?.split(' ').map((n: string) => n[0]).join('')}</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-slate-900 truncate">{tenant?.full_name}</p>
+                  <p className="text-[11px] text-slate-500">{room?.name} - {bed?.bed_number}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm font-bold text-slate-900">{formatINR(invoice.total_amount)}</p>
+                  {invoice.status === 'overdue' && (
+                    <span className="text-[10px] text-red-600 font-semibold">Overdue</span>
+                  )}
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+
+      {/* Selected invoice detail */}
+      {tab === 'rent' && selectedInv && (
+        <div>
+          <button onClick={() => setSelectedInvoice(null)} className="text-xs text-primary font-semibold mb-3">&larr; Back</button>
+          <div className="bg-white rounded-xl p-4 border border-slate-100 shadow-sm mb-4">
+            <p className="text-base font-bold text-slate-900">{selectedInv.tenant?.full_name}</p>
+            <p className="text-xs text-slate-500">{selectedInv.room?.name} - {selectedInv.bed?.bed_number}</p>
+            <div className="bg-slate-50 rounded-lg p-3 mt-3 space-y-1.5">
+              <div className="flex justify-between text-sm"><span className="text-slate-500">Total Due</span><span className="font-bold">{formatINR(selectedInv.invoice.total_amount)}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-slate-500">Already Paid</span><span className="font-medium">{formatINR(selectedInv.invoice.amount_paid || 0)}</span></div>
+              <div className="border-t pt-1.5 flex justify-between text-sm"><span className="font-semibold">Remaining</span><span className="text-lg font-bold text-primary">{formatINR(Number(selectedInv.invoice.total_amount) - Number(selectedInv.invoice.amount_paid || 0))}</span></div>
+            </div>
+          </div>
+
+          {/* Amount (allows partial) */}
+          <div className="mb-3">
+            <label className="text-xs font-semibold text-slate-600 mb-1 block">Amount to collect</label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">₹</span>
+              <input
+                type="number"
+                value={customAmount || (Number(selectedInv.invoice.total_amount) - Number(selectedInv.invoice.amount_paid || 0))}
+                onChange={(e) => setCustomAmount(e.target.value)}
+                className="w-full pl-7 pr-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+              />
+            </div>
+          </div>
+
+          <PaymentMethodPicker method={paymentMethod} onChange={setPaymentMethod} ref_={transactionRef} onRefChange={setTransactionRef} />
+
+          <button onClick={handlePayRent} disabled={paying} className="w-full py-3.5 bg-emerald-600 text-white font-semibold rounded-xl text-sm hover:bg-emerald-700 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-2 mt-3">
+            <Check className="w-4 h-4" />
+            {paying ? 'Processing...' : `Record Payment`}
+          </button>
+        </div>
+      )}
+
+      {/* ── DEPOSIT TAB ── */}
+      {tab === 'deposit' && !selectedOccupancy && (
+        <div className="space-y-2">
+          {activeTenants.length === 0 ? (
+            <div className="text-center py-8"><p className="text-sm text-slate-400">No active tenants</p></div>
+          ) : (
+            filteredTenants.map(({ occupancy, tenant, room, bed }: any) => (
+              <button
+                key={occupancy.id}
+                onClick={() => { setSelectedOccupancy(occupancy.id); setCustomAmount(String(occupancy.deposit_amount || occupancy.monthly_rent)) }}
+                className="w-full flex items-center gap-3 bg-white rounded-xl p-3.5 border border-slate-100 shadow-sm hover:shadow-md text-left"
+              >
+                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                  <span className="text-xs font-bold text-primary">{tenant?.full_name?.split(' ').map((n: string) => n[0]).join('')}</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-slate-900">{tenant?.full_name}</p>
+                  <p className="text-[11px] text-slate-500">{room?.name}</p>
+                </div>
+                <div className="text-right text-xs">
+                  <p className="font-semibold text-slate-700">Deposit: {formatINR(occupancy.deposit_amount || 0)}</p>
+                  <p className="text-slate-400">Paid: {formatINR(occupancy.deposit_paid || 0)}</p>
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+
+      {tab === 'deposit' && selectedTenant && (
+        <div>
+          <button onClick={() => setSelectedOccupancy(null)} className="text-xs text-primary font-semibold mb-3">&larr; Back</button>
+          <div className="bg-white rounded-xl p-4 border border-slate-100 shadow-sm mb-4">
+            <p className="text-base font-bold text-slate-900">{selectedTenant.tenant?.full_name}</p>
+            <div className="flex justify-between text-sm mt-2"><span className="text-slate-500">Deposit Required</span><span className="font-bold">{formatINR(selectedTenant.occupancy.deposit_amount || 0)}</span></div>
+            <div className="flex justify-between text-sm"><span className="text-slate-500">Already Paid</span><span className="font-medium text-emerald-600">{formatINR(selectedTenant.occupancy.deposit_paid || 0)}</span></div>
+          </div>
+          <div className="mb-3">
+            <label className="text-xs font-semibold text-slate-600 mb-1 block">Deposit amount</label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">₹</span>
+              <input type="number" value={customAmount} onChange={(e) => setCustomAmount(e.target.value)} className="w-full pl-7 pr-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
+            </div>
+          </div>
+          <PaymentMethodPicker method={paymentMethod} onChange={setPaymentMethod} ref_={transactionRef} onRefChange={setTransactionRef} />
+          <button onClick={handlePayDeposit} disabled={paying || !customAmount} className="w-full py-3.5 bg-emerald-600 text-white font-semibold rounded-xl text-sm hover:bg-emerald-700 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-2 mt-3">
+            <Shield className="w-4 h-4" />
+            {paying ? 'Processing...' : 'Record Deposit'}
+          </button>
+        </div>
+      )}
+
+      {/* ── ADVANCE TAB ── */}
+      {tab === 'advance' && !selectedOccupancy && (
+        <div className="space-y-2">
+          {activeTenants.length === 0 ? (
+            <div className="text-center py-8"><p className="text-sm text-slate-400">No active tenants</p></div>
+          ) : (
+            filteredTenants.map(({ occupancy, tenant, room }: any) => (
+              <button
+                key={occupancy.id}
+                onClick={() => setSelectedOccupancy(occupancy.id)}
+                className="w-full flex items-center gap-3 bg-white rounded-xl p-3.5 border border-slate-100 shadow-sm hover:shadow-md text-left"
+              >
+                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                  <span className="text-xs font-bold text-primary">{tenant?.full_name?.split(' ').map((n: string) => n[0]).join('')}</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-slate-900">{tenant?.full_name}</p>
+                  <p className="text-[11px] text-slate-500">{room?.name} &middot; {formatINR(occupancy.monthly_rent)}/mo</p>
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+
+      {tab === 'advance' && selectedTenant && (
+        <div>
+          <button onClick={() => setSelectedOccupancy(null)} className="text-xs text-primary font-semibold mb-3">&larr; Back</button>
+          <div className="bg-white rounded-xl p-4 border border-slate-100 shadow-sm mb-4">
+            <p className="text-base font-bold text-slate-900">{selectedTenant.tenant?.full_name}</p>
+            <p className="text-xs text-slate-500">Monthly rent: {formatINR(selectedTenant.occupancy.monthly_rent)}</p>
+          </div>
+          <div className="mb-3">
+            <label className="text-xs font-semibold text-slate-600 mb-1 block">Number of months</label>
+            <div className="flex gap-2">
+              {[1, 2, 3, 6, 12].map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setAdvanceMonths(m)}
+                  className={`flex-1 py-2 rounded-xl text-sm font-semibold transition-all ${
+                    advanceMonths === m ? 'bg-primary text-white' : 'bg-slate-100 text-slate-600'
+                  }`}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="bg-slate-50 rounded-xl p-3 mb-3">
+            <div className="flex justify-between text-sm"><span className="text-slate-500">{advanceMonths} × {formatINR(selectedTenant.occupancy.monthly_rent)}</span>
+              <span className="text-lg font-bold text-slate-900">{formatINR(Number(selectedTenant.occupancy.monthly_rent) * advanceMonths)}</span>
+            </div>
+          </div>
+          <PaymentMethodPicker method={paymentMethod} onChange={setPaymentMethod} ref_={transactionRef} onRefChange={setTransactionRef} />
+          <button onClick={handlePayAdvance} disabled={paying} className="w-full py-3.5 bg-emerald-600 text-white font-semibold rounded-xl text-sm hover:bg-emerald-700 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-2 mt-3">
+            <FastForward className="w-4 h-4" />
+            {paying ? 'Processing...' : `Pay ${advanceMonths} Month${advanceMonths > 1 ? 's' : ''} Advance`}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function PaymentMethodPicker({ method, onChange, ref_, onRefChange }: { method: string; onChange: (m: string) => void; ref_: string; onRefChange: (r: string) => void }) {
+  return (
+    <div className="bg-white rounded-xl p-3 border border-slate-100 shadow-sm mb-3">
+      <p className="text-xs font-semibold text-slate-600 mb-2">Payment Method</p>
+      <div className="grid grid-cols-2 gap-2">
+        {paymentMethods.map((m) => {
+          const Icon = m.icon
+          return (
+            <button
+              key={m.key}
+              onClick={() => onChange(m.key)}
+              className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border-2 transition-all ${
+                method === m.key ? 'border-primary bg-primary/5' : 'border-slate-200'
+              }`}
+            >
+              <Icon className={`w-4 h-4 ${method === m.key ? 'text-primary' : 'text-slate-400'}`} />
+              <span className={`text-sm font-medium ${method === m.key ? 'text-primary' : 'text-slate-600'}`}>{m.label}</span>
+            </button>
+          )
+        })}
+      </div>
+      {method !== 'cash' && (
+        <div className="mt-2">
+          <input type="text" placeholder="Transaction reference" value={ref_} onChange={(e) => onRefChange(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
+        </div>
+      )}
     </div>
   )
 }

@@ -17,11 +17,11 @@ import {
   IndianRupee,
   Receipt,
   FileBarChart,
+  Mail,
+  Lock,
 } from 'lucide-react'
 import type { StaffRole } from '@/lib/types'
 import { useAuth } from '@/lib/auth-context'
-import { useMutation } from '@/lib/hooks/use-query'
-import { inviteStaff } from '@/lib/services/staff'
 
 const roles: { key: StaffRole; label: string; desc: string; icon: typeof Crown; color: string }[] = [
   { key: 'manager', label: 'Manager', desc: 'Full access except owner settings', icon: ShieldCheck, color: 'bg-indigo-50 text-indigo-600' },
@@ -50,12 +50,14 @@ const roleDefaults: Record<StaffRole, Record<string, boolean>> = {
 export default function InviteStaff() {
   const { orgId } = useAuth()
   const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [phone, setPhone] = useState('')
   const [role, setRole] = useState<StaffRole | ''>('')
   const [perms, setPerms] = useState<Record<string, boolean>>({})
   const [saved, setSaved] = useState(false)
-
-  const inviteMut = useMutation(inviteStaff)
+  const [creating, setCreating] = useState(false)
+  const [error, setError] = useState('')
 
   const selectRole = (r: StaffRole) => {
     setRole(r)
@@ -67,10 +69,25 @@ export default function InviteStaff() {
   }
 
   const handleSubmit = async () => {
-    if (!orgId || !name || !phone || !role) return
-    const result = await inviteMut.mutate(orgId, name, phone, role, perms)
-    if (result) {
-      setSaved(true)
+    if (!orgId || !name || !email || !password || !role) return
+    setCreating(true)
+    setError('')
+    try {
+      const res = await fetch('/api/admin/create-staff', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orgId, name, email, password, phone, role, permissions: perms }),
+      })
+      const result = await res.json()
+      if (!res.ok) {
+        setError(result.error || 'Failed to create staff member')
+      } else {
+        setSaved(true)
+      }
+    } catch {
+      setError('Failed to create staff member')
+    } finally {
+      setCreating(false)
     }
   }
 
@@ -80,13 +97,13 @@ export default function InviteStaff() {
         <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-4">
           <Check className="w-8 h-8 text-emerald-600" />
         </div>
-        <h3 className="text-lg font-bold text-slate-900">Invite Sent!</h3>
+        <h3 className="text-lg font-bold text-slate-900">Staff Created!</h3>
         <p className="text-sm text-slate-500 mt-1">
-          {name} will receive a WhatsApp link to join as {role}
+          {name} can now log in with their email and password
         </p>
         <div className="flex gap-2 mt-6 max-w-xs mx-auto">
           <button
-            onClick={() => { setSaved(false); setName(''); setPhone(''); setRole(''); setPerms({}) }}
+            onClick={() => { setSaved(false); setName(''); setEmail(''); setPassword(''); setPhone(''); setRole(''); setPerms({}) }}
             className="flex-1 py-2.5 bg-primary text-white font-semibold rounded-xl text-sm hover:bg-primary-dark active:scale-[0.98] transition-all"
           >
             Invite Another
@@ -120,7 +137,35 @@ export default function InviteStaff() {
       </div>
 
       <div>
-        <label className="text-xs font-semibold text-slate-600 mb-1 block">Phone Number</label>
+        <label className="text-xs font-semibold text-slate-600 mb-1 block">Email (for login)</label>
+        <div className="relative">
+          <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+          <input
+            type="email"
+            placeholder="staff@example.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="w-full pl-10 pr-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+          />
+        </div>
+      </div>
+
+      <div>
+        <label className="text-xs font-semibold text-slate-600 mb-1 block">Password</label>
+        <div className="relative">
+          <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+          <input
+            type="password"
+            placeholder="Min 6 characters"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="w-full pl-10 pr-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+          />
+        </div>
+      </div>
+
+      <div>
+        <label className="text-xs font-semibold text-slate-600 mb-1 block">Phone (optional)</label>
         <div className="relative">
           <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
           <input
@@ -197,9 +242,9 @@ export default function InviteStaff() {
       )}
 
       {/* Error display */}
-      {inviteMut.error && (
+      {error && (
         <div className="bg-red-50 text-red-600 text-xs rounded-xl p-3 border border-red-100">
-          {inviteMut.error}
+          {error}
         </div>
       )}
 
@@ -207,11 +252,11 @@ export default function InviteStaff() {
       {role && (
         <button
           onClick={handleSubmit}
-          disabled={!name || !phone || inviteMut.loading}
+          disabled={!name || !email || !password || creating}
           className="w-full py-3.5 bg-primary text-white font-semibold rounded-xl text-sm hover:bg-primary-dark active:scale-[0.98] transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
           <UserPlus className="w-4 h-4" />
-          {inviteMut.loading ? 'Sending...' : 'Send Invite via WhatsApp'}
+          {creating ? 'Creating...' : 'Create Staff Account'}
         </button>
       )}
     </div>
