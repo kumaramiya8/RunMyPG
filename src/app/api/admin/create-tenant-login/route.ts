@@ -11,6 +11,15 @@ function getAdminClient() {
 
 export async function POST(request: NextRequest) {
   try {
+    // Debug: check env vars
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+    if (!url || !key) {
+      return NextResponse.json({
+        error: `Missing env vars: URL=${url ? 'set' : 'MISSING'}, SERVICE_KEY=${key ? 'set' : 'MISSING'}`
+      }, { status: 500 })
+    }
+
     const { tenantId, orgId, email, password } = await request.json()
 
     if (!tenantId || !orgId || !email || !password) {
