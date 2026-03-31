@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import {
   User,
   Phone,
@@ -15,10 +16,15 @@ import {
   Clock,
   AlertTriangle,
   ChevronRight,
+  LogIn,
+  Loader2,
+  Eye,
+  EyeOff,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
 import { useQuery } from '@/lib/hooks/use-query'
+import { supabase } from '@/lib/supabase'
 import { getTenantById, getActiveOccupancies } from '@/lib/services/tenants'
 import { ListSkeleton } from '@/components/loading-skeleton'
 import type { Occupancy, Tenant, Bed, Room } from '@/lib/types'
@@ -161,6 +167,9 @@ export default function TenantProfile({ tenantId }: { tenantId: string }) {
         </div>
       )}
 
+      {/* Tenant Login */}
+      <TenantLoginSection tenantId={tenantId} tenant={tenant} orgId={orgId!} />
+
       {/* Payment History placeholder */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100">
         <div className="flex items-center justify-between p-4">
@@ -197,6 +206,143 @@ export default function TenantProfile({ tenantId }: { tenantId: string }) {
           color={tenant.aadhaar_verified ? 'text-emerald-500' : 'text-slate-400'}
         />
       </div>
+    </div>
+  )
+}
+
+function TenantLoginSection({ tenantId, tenant, orgId }: { tenantId: string; tenant: Tenant; orgId: string }) {
+  const [showForm, setShowForm] = useState(false)
+  const [email, setEmail] = useState(tenant.email || '')
+  const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [result, setResult] = useState<{ success: boolean; message: string } | null>(null)
+
+  const { data: loginInfo, loading: loginLoading, refetch: refetchLogin } = useQuery(
+    async () => {
+      const { data, error } = await supabase
+        .from('tenant_users')
+        .select('email')
+        .eq('tenant_id', tenantId)
+        .maybeSingle()
+      if (error) throw error
+      return data
+    },
+    [tenantId]
+  )
+
+  const handleSubmit = async () => {
+    if (!email.trim() || !password.trim()) return
+    setSubmitting(true)
+    setResult(null)
+    try {
+      const res = await fetch('/api/admin/create-tenant-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenantId, orgId, email: email.trim(), password }),
+      })
+      const json = await res.json()
+      if (!res.ok) {
+        setResult({ success: false, message: json.error || 'Failed to create login' })
+      } else {
+        setResult({ success: true, message: 'Login created successfully' })
+        setShowForm(false)
+        setPassword('')
+        refetchLogin()
+      }
+    } catch {
+      setResult({ success: false, message: 'Network error. Please try again.' })
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100">
+      <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Tenant Login</h3>
+
+      {loginLoading ? (
+        <div className="py-3 flex items-center gap-2 text-sm text-slate-400">
+          <Loader2 className="w-4 h-4 animate-spin" /> Checking...
+        </div>
+      ) : loginInfo ? (
+        <div className="flex items-center gap-3 py-2">
+          <div className="p-1.5 rounded-lg bg-emerald-50 shrink-0">
+            <CheckCircle className="w-4 h-4 text-emerald-500" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-[10px] text-slate-400 font-medium">Login enabled</p>
+            <p className="text-sm text-slate-800 font-medium truncate">{loginInfo.email}</p>
+          </div>
+        </div>
+      ) : (
+        <>
+          {!showForm ? (
+            <button
+              onClick={() => setShowForm(true)}
+              className="w-full py-2.5 bg-primary/10 text-primary font-semibold rounded-xl text-sm flex items-center justify-center gap-2 hover:bg-primary/20 active:bg-primary/25 transition-colors"
+            >
+              <LogIn className="w-4 h-4" /> Create Login
+            </button>
+          ) : (
+            <div className="space-y-3">
+              <div>
+                <label className="text-[11px] font-medium text-slate-500 mb-1 block">Email</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="tenant@email.com"
+                  className="w-full px-3 py-2.5 bg-slate-50 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-medium text-slate-500 mb-1 block">Password</label>
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Minimum 6 characters"
+                    className="w-full px-3 py-2.5 pr-10 bg-slate-50 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setShowForm(false); setResult(null) }}
+                  className="flex-1 py-2.5 bg-slate-100 text-slate-600 font-semibold rounded-xl text-sm hover:bg-slate-200 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSubmit}
+                  disabled={submitting || !email.trim() || password.length < 6}
+                  className="flex-1 py-2.5 bg-primary text-white font-semibold rounded-xl text-sm hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                >
+                  {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogIn className="w-4 h-4" />}
+                  {submitting ? 'Creating...' : 'Create'}
+                </button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {result && (
+        <div className={`mt-3 px-3 py-2 rounded-lg text-xs font-medium ${
+          result.success ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'
+        }`}>
+          {result.message}
+        </div>
+      )}
     </div>
   )
 }

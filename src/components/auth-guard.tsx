@@ -6,15 +6,27 @@ import { useEffect } from 'react'
 import { LogoIcon } from './logo'
 
 export default function AuthGuard({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth()
+  const { user, loading, isTenant, userRole } = useAuth()
   const router = useRouter()
   const pathname = usePathname()
 
   useEffect(() => {
-    if (!loading && !user && pathname !== '/login' && pathname !== '/signup') {
+    if (loading) return
+    if (!user && pathname !== '/login' && pathname !== '/signup') {
       router.replace('/login')
+      return
     }
-  }, [user, loading, pathname, router])
+
+    // Redirect tenant away from owner pages
+    if (user && isTenant && !pathname.startsWith('/tenant') && pathname !== '/login') {
+      router.replace('/tenant')
+    }
+
+    // Redirect staff away from tenant pages
+    if (user && !isTenant && userRole && pathname.startsWith('/tenant')) {
+      router.replace('/')
+    }
+  }, [user, loading, isTenant, userRole, pathname, router])
 
   if (loading) {
     return (

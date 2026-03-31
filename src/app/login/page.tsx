@@ -26,10 +26,12 @@ export default function LoginPage() {
       setError(error)
       setLoading(false)
     } else {
-      // Check if master — redirect accordingly
       const slug = accountSlug.toLowerCase().trim()
+      const savedRole = localStorage.getItem('runmypg_user_role')
       if (slug === 'runmypg') {
         router.replace('/admin')
+      } else if (savedRole === 'tenant') {
+        router.replace('/tenant')
       } else {
         router.replace('/')
       }
