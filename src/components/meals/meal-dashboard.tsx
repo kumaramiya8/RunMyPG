@@ -15,7 +15,11 @@ import {
   Check,
   X,
 } from 'lucide-react'
-import { mockTenants, mockOccupancies } from '@/lib/mock-data'
+import { useAuth } from '@/lib/auth-context'
+import { useQuery, useMutation } from '@/lib/hooks/use-query'
+import { getActiveOccupancies } from '@/lib/services/tenants'
+import { getMealOptouts, toggleMealOptout } from '@/lib/services/meals'
+import { ListSkeleton, EmptyState } from '@/components/loading-skeleton'
 
 type MealType = 'breakfast' | 'lunch' | 'dinner'
 
@@ -23,21 +27,6 @@ const mealConfig: Record<MealType, { label: string; icon: typeof Coffee; time: s
   breakfast: { label: 'Breakfast', icon: Coffee, time: '7:30 - 9:00 AM', color: 'text-amber-600', bg: 'bg-amber-50' },
   lunch: { label: 'Lunch', icon: Sun, time: '12:30 - 2:00 PM', color: 'text-orange-600', bg: 'bg-orange-50' },
   dinner: { label: 'Dinner', icon: Moon, time: '7:30 - 9:00 PM', color: 'text-indigo-600', bg: 'bg-indigo-50' },
-}
-
-// Generate mock opt-outs — roughly 15-20% skip each meal
-function generateOptOuts(dateStr: string): Record<MealType, Set<string>> {
-  const seed = dateStr.split('-').reduce((a, b) => a + parseInt(b), 0)
-  const result: Record<MealType, Set<string>> = { breakfast: new Set(), lunch: new Set(), dinner: new Set() }
-  const tenantIds = mockTenants.map((t) => t.id)
-
-  tenantIds.forEach((id, i) => {
-    const hash = (seed * (i + 1) * 7) % 100
-    if (hash < 15) result.breakfast.add(id)
-    if ((hash + 30) % 100 < 18) result.lunch.add(id)
-    if ((hash + 60) % 100 < 22) result.dinner.add(id)
-  })
-  return result
 }
 
 function formatDate(date: Date): string {
@@ -55,34 +44,49 @@ function formatDisplayDate(date: Date): string {
 }
 
 export default function MealDashboard() {
+  const { orgId } = useAuth()
   const [selectedDate, setSelectedDate] = useState(new Date())
   const [selectedMeal, setSelectedMeal] = useState<MealType>('dinner')
   const [search, setSearch] = useState('')
-  const [localOptOuts, setLocalOptOuts] = useState<Record<string, Record<MealType, Set<string>>>>({})
 
   const dateStr = formatDate(selectedDate)
 
-  // Get or generate opt-outs for this date
-  const getOptOuts = (): Record<MealType, Set<string>> => {
-    if (localOptOuts[dateStr]) return localOptOuts[dateStr]
-    return generateOptOuts(dateStr)
+  const { data: occupancies, loading: occLoading } = useQuery(
+    () => getActiveOccupancies(orgId!),
+    [orgId]
+  )
+
+  const { data: optoutsData, loading: optLoading, refetch: refetchOptouts } = useQuery(
+    () => getMealOptouts(orgId!, dateStr),
+    [orgId, dateStr]
+  )
+
+  const toggleMut = useMutation(toggleMealOptout)
+
+  const loading = occLoading || optLoading
+
+  // Build opt-out sets from real data
+  const optOuts: Record<MealType, Set<string>> = { breakfast: new Set(), lunch: new Set(), dinner: new Set() }
+  if (optoutsData) {
+    for (const row of optoutsData) {
+      const mt = row.meal_type as MealType
+      if (optOuts[mt]) {
+        optOuts[mt].add(row.tenant_id)
+      }
+    }
   }
 
-  const optOuts = getOptOuts()
-  const totalActive = mockOccupancies.filter((o) => o.status !== 'checked_out').length
+  const activeTenants = (occupancies || []).map((o: any) => ({
+    id: o.tenant?.id,
+    full_name: o.tenant?.full_name || 'Unknown',
+  })).filter((t: any) => t.id)
 
-  const toggleOptOut = (tenantId: string, meal: MealType) => {
-    setLocalOptOuts((prev) => {
-      const current = prev[dateStr] || generateOptOuts(dateStr)
-      const updated = { ...current }
-      updated[meal] = new Set(current[meal])
-      if (updated[meal].has(tenantId)) {
-        updated[meal].delete(tenantId)
-      } else {
-        updated[meal].add(tenantId)
-      }
-      return { ...prev, [dateStr]: updated }
-    })
+  const totalActive = activeTenants.length
+
+  const handleToggle = async (tenantId: string, meal: MealType) => {
+    if (!orgId) return
+    await toggleMut.mutate(orgId, tenantId, dateStr, meal)
+    refetchOptouts()
   }
 
   const changeDate = (days: number) => {
@@ -91,13 +95,8 @@ export default function MealDashboard() {
     setSelectedDate(newDate)
   }
 
-  // Filter tenants
-  const activeTenants = mockTenants.filter((t) =>
-    mockOccupancies.some((o) => o.tenant_id === t.id && o.status !== 'checked_out')
-  )
-
   const filteredTenants = search
-    ? activeTenants.filter((t) =>
+    ? activeTenants.filter((t: any) =>
         t.full_name.toLowerCase().includes(search.toLowerCase())
       )
     : activeTenants
@@ -108,6 +107,9 @@ export default function MealDashboard() {
     lunch: { eating: totalActive - optOuts.lunch.size, skipping: optOuts.lunch.size },
     dinner: { eating: totalActive - optOuts.dinner.size, skipping: optOuts.dinner.size },
   }
+
+  if (!orgId) return null
+  if (loading) return <ListSkeleton rows={6} />
 
   return (
     <div>
@@ -217,7 +219,7 @@ export default function MealDashboard() {
 
       {/* Tenant opt-out list */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 divide-y divide-slate-50">
-        {filteredTenants.map((tenant) => {
+        {filteredTenants.map((tenant: any) => {
           const isOptedOut = optOuts[selectedMeal].has(tenant.id)
           return (
             <div
@@ -228,7 +230,7 @@ export default function MealDashboard() {
                 isOptedOut ? 'bg-red-50' : 'bg-emerald-50'
               }`}>
                 <span className={`text-xs font-bold ${isOptedOut ? 'text-red-400' : 'text-emerald-600'}`}>
-                  {tenant.full_name.split(' ').map((n) => n[0]).join('')}
+                  {tenant.full_name.split(' ').map((n: string) => n[0]).join('')}
                 </span>
               </div>
               <div className="flex-1 min-w-0">
@@ -237,7 +239,7 @@ export default function MealDashboard() {
                 </p>
               </div>
               <button
-                onClick={() => toggleOptOut(tenant.id, selectedMeal)}
+                onClick={() => handleToggle(tenant.id, selectedMeal)}
                 className={`w-12 h-7 rounded-full flex items-center transition-all ${
                   isOptedOut
                     ? 'bg-red-100 justify-start pl-1'

@@ -15,16 +15,14 @@ import {
   Bath,
   Sun,
   Tv,
+  Building2,
 } from 'lucide-react'
-import {
-  mockFloors,
-  mockRooms,
-  mockBeds,
-  getTenantForBed,
-  getOccupancyForBed,
-  getBedStats,
-} from '@/lib/mock-data'
-import type { Bed as BedType, BedStatus } from '@/lib/types'
+import { useAuth } from '@/lib/auth-context'
+import { useQuery } from '@/lib/hooks/use-query'
+import { getFullPropertyTree } from '@/lib/services/property'
+import { getActiveOccupancies } from '@/lib/services/tenants'
+import { ListSkeleton, EmptyState } from '@/components/loading-skeleton'
+import type { Bed as BedType, BedStatus, Floor, Room, Occupancy, Tenant } from '@/lib/types'
 
 // ── Status config ───────────────────────────────────────────────────
 
@@ -36,12 +34,29 @@ const statusConfig: Record<BedStatus, { bg: string; label: string; dotColor: str
   maintenance: { bg: 'bg-orange-100 border-orange-200', label: 'Maintenance', dotColor: 'bg-orange-400' },
 }
 
+// ── Types for occupancy with joined data ────────────────────────────
+
+interface OccupancyWithJoins extends Occupancy {
+  tenant: Tenant
+  bed: BedType & { room: Room }
+}
+
 // ── Bed Detail Sheet ────────────────────────────────────────────────
 
-function BedDetailSheet({ bed, onClose }: { bed: BedType; onClose: () => void }) {
-  const tenant = getTenantForBed(bed.id)
-  const occupancy = getOccupancyForBed(bed.id)
-  const room = mockRooms.find((r) => r.id === bed.room_id)
+function BedDetailSheet({
+  bed,
+  rooms,
+  occupancies,
+  onClose,
+}: {
+  bed: BedType
+  rooms: Room[]
+  occupancies: OccupancyWithJoins[]
+  onClose: () => void
+}) {
+  const occupancy = occupancies.find((o) => o.bed_id === bed.id)
+  const tenant = occupancy?.tenant
+  const room = rooms.find((r) => r.id === bed.room_id)
   const config = statusConfig[bed.status]
 
   return (
@@ -193,14 +208,59 @@ function ordinal(n: number): string {
 // ── Main Bed Map ────────────────────────────────────────────────────
 
 export default function BedMap() {
+  const { orgId } = useAuth()
   const [selectedBed, setSelectedBed] = useState<BedType | null>(null)
   const [filterStatus, setFilterStatus] = useState<BedStatus | 'all'>('all')
-  const stats = getBedStats()
+
+  const { data: property, loading: propertyLoading } = useQuery(
+    () => getFullPropertyTree(orgId!),
+    [orgId]
+  )
+
+  const { data: occupancies, loading: occupanciesLoading } = useQuery(
+    () => getActiveOccupancies(orgId!),
+    [orgId]
+  )
+
+  const loading = propertyLoading || occupanciesLoading
+
+  if (loading) {
+    return <ListSkeleton rows={6} />
+  }
+
+  const floors = property?.floors ?? []
+  const rooms = property?.rooms ?? []
+  const beds = property?.beds ?? []
+  const activeOccupancies = (occupancies ?? []) as OccupancyWithJoins[]
+
+  if (floors.length === 0) {
+    return (
+      <EmptyState
+        icon={Building2}
+        title="No property set up yet"
+        description="Go to Property Setup to add buildings."
+      />
+    )
+  }
+
+  // Compute stats from real data
+  const stats = {
+    total: beds.length,
+    occupied: beds.filter((b) => b.status === 'occupied').length,
+    vacant: beds.filter((b) => b.status === 'vacant').length,
+    notice: beds.filter((b) => b.status === 'notice').length,
+    blocked: beds.filter((b) => b.status === 'blocked').length,
+  }
 
   const filteredBeds = (roomId: string) => {
-    const beds = mockBeds.filter((b) => b.room_id === roomId)
-    if (filterStatus === 'all') return beds
-    return beds.filter((b) => b.status === filterStatus)
+    const roomBeds = beds.filter((b) => b.room_id === roomId)
+    if (filterStatus === 'all') return roomBeds
+    return roomBeds.filter((b) => b.status === filterStatus)
+  }
+
+  const getTenantForBed = (bedId: string) => {
+    const occ = activeOccupancies.find((o) => o.bed_id === bedId)
+    return occ?.tenant ?? null
   }
 
   return (
@@ -231,9 +291,9 @@ export default function BedMap() {
 
       {/* Floor sections */}
       <div className="space-y-4 mt-4">
-        {mockFloors.map((floor) => {
-          const rooms = mockRooms.filter((r) => r.floor_id === floor.id)
-          const hasVisibleBeds = rooms.some((r) => filteredBeds(r.id).length > 0)
+        {floors.map((floor) => {
+          const floorRooms = rooms.filter((r) => r.floor_id === floor.id)
+          const hasVisibleBeds = floorRooms.some((r) => filteredBeds(r.id).length > 0)
           if (!hasVisibleBeds && filterStatus !== 'all') return null
 
           return (
@@ -241,14 +301,14 @@ export default function BedMap() {
               {/* Floor header */}
               <div className="px-4 py-3 bg-slate-50/50 border-b border-slate-100">
                 <h3 className="text-sm font-bold text-slate-800">{floor.name}</h3>
-                <p className="text-[10px] text-slate-400 mt-0.5">{rooms.length} rooms</p>
+                <p className="text-[10px] text-slate-400 mt-0.5">{floorRooms.length} rooms</p>
               </div>
 
               {/* Rooms grid */}
               <div className="p-3 space-y-3">
-                {rooms.map((room) => {
-                  const beds = filteredBeds(room.id)
-                  if (beds.length === 0 && filterStatus !== 'all') return null
+                {floorRooms.map((room) => {
+                  const roomBeds = filteredBeds(room.id)
+                  if (roomBeds.length === 0 && filterStatus !== 'all') return null
 
                   return (
                     <div key={room.id}>
@@ -260,9 +320,9 @@ export default function BedMap() {
                         </div>
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        {beds.map((bed) => {
+                        {roomBeds.map((bed) => {
                           const tenant = getTenantForBed(bed.id)
-                          const cfg = statusConfig[bed.status]
+                          const cfg = statusConfig[bed.status as BedStatus] || statusConfig.vacant
                           return (
                             <button
                               key={bed.id}
@@ -306,7 +366,12 @@ export default function BedMap() {
 
       {/* Bed detail sheet */}
       {selectedBed && (
-        <BedDetailSheet bed={selectedBed} onClose={() => setSelectedBed(null)} />
+        <BedDetailSheet
+          bed={selectedBed}
+          rooms={rooms}
+          occupancies={activeOccupancies}
+          onClose={() => setSelectedBed(null)}
+        />
       )}
     </>
   )

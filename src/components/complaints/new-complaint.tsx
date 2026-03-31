@@ -14,7 +14,11 @@ import {
   Building2,
   AlertTriangle,
 } from 'lucide-react'
-import { mockRooms, mockFloors } from '@/lib/mock-data'
+import { useAuth } from '@/lib/auth-context'
+import { useQuery } from '@/lib/hooks/use-query'
+import { useMutation } from '@/lib/hooks/use-query'
+import { createComplaint } from '@/lib/services/complaints'
+import { getFullPropertyTree } from '@/lib/services/property'
 
 const categories = [
   { key: 'Electrical', label: 'Electrical', icon: Zap, color: 'bg-yellow-50 text-yellow-600 border-yellow-200', desc: 'Fan, light, AC, wiring' },
@@ -32,11 +36,33 @@ const priorities = [
 ]
 
 export default function NewComplaint() {
+  const { orgId } = useAuth()
   const [category, setCategory] = useState('')
   const [roomId, setRoomId] = useState('')
   const [description, setDescription] = useState('')
   const [priority, setPriority] = useState('medium')
   const [saved, setSaved] = useState(false)
+
+  const { data: propertyTree } = useQuery(
+    () => getFullPropertyTree(orgId!),
+    [orgId]
+  )
+
+  const { mutate: doCreateComplaint, loading: saving, error } = useMutation(
+    (rId: string, cat: string, desc: string, pri: string) =>
+      createComplaint(orgId!, rId, null, cat, desc, pri)
+  )
+
+  const floors = propertyTree?.floors || []
+  const rooms = propertyTree?.rooms || []
+
+  const handleSubmit = async () => {
+    if (!category || !roomId || !description || !orgId) return
+    const result = await doCreateComplaint(roomId, category, description, priority)
+    if (result !== null) {
+      setSaved(true)
+    }
+  }
 
   if (saved) {
     return (
@@ -117,9 +143,9 @@ export default function NewComplaint() {
             className="w-full pl-10 pr-8 py-2.5 rounded-xl border border-slate-200 text-sm appearance-none bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
           >
             <option value="">Select a room...</option>
-            {mockFloors.map((floor) => (
+            {floors.map((floor: any) => (
               <optgroup key={floor.id} label={floor.name}>
-                {mockRooms.filter((r) => r.floor_id === floor.id).map((room) => (
+                {rooms.filter((r: any) => r.floor_id === floor.id).map((room: any) => (
                   <option key={room.id} value={room.id}>{room.name}</option>
                 ))}
               </optgroup>
@@ -171,14 +197,18 @@ export default function NewComplaint() {
         </div>
       </div>
 
+      {error && (
+        <p className="text-sm text-red-600 bg-red-50 rounded-lg p-2">{error}</p>
+      )}
+
       {/* Submit */}
       <button
-        onClick={() => setSaved(true)}
-        disabled={!category || !roomId || !description}
+        onClick={handleSubmit}
+        disabled={!category || !roomId || !description || saving}
         className="w-full py-3.5 bg-red-600 text-white font-semibold rounded-xl text-sm hover:bg-red-700 active:scale-[0.98] transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
       >
         <AlertTriangle className="w-4 h-4" />
-        Submit Complaint
+        {saving ? 'Submitting...' : 'Submit Complaint'}
       </button>
     </div>
   )

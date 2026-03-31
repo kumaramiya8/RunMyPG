@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   User,
   Phone,
@@ -20,8 +20,10 @@ import {
   Trash2,
   Power,
 } from 'lucide-react'
-import { mockStaff } from '@/lib/mock-data'
 import type { StaffRole } from '@/lib/types'
+import { useQuery, useMutation } from '@/lib/hooks/use-query'
+import { getStaffById, updatePermissions, toggleStaffActive } from '@/lib/services/staff'
+import { ListSkeleton } from '@/components/loading-skeleton'
 
 const roleConfig: Record<StaffRole, { label: string; icon: typeof Crown; color: string; bg: string }> = {
   owner: { label: 'Owner', icon: Crown, color: 'text-amber-600', bg: 'bg-amber-50' },
@@ -42,20 +44,43 @@ const permissionDefs = [
 
 type PermKey = typeof permissionDefs[number]['key']
 
-export default function StaffDetail({ staffId }: { staffId: string }) {
-  const staff = mockStaff.find((s) => s.id === staffId)
+function getInitials(name: string): string {
+  return name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
+}
 
-  const [perms, setPerms] = useState<Record<PermKey, boolean>>(() => {
-    if (!staff) return {} as Record<PermKey, boolean>
-    return {
-      can_view_beds: staff.can_view_beds,
-      can_manage_checkins: staff.can_manage_checkins,
-      can_view_complaints: staff.can_view_complaints,
-      can_view_finances: staff.can_view_finances,
-      can_manage_expenses: staff.can_manage_expenses,
-      can_view_reports: staff.can_view_reports,
-    }
+export default function StaffDetail({ staffId }: { staffId: string }) {
+  const { data: staff, loading, error, refetch } = useQuery(
+    () => getStaffById(staffId),
+    [staffId]
+  )
+
+  const updatePermsMut = useMutation(updatePermissions)
+  const toggleActiveMut = useMutation(toggleStaffActive)
+
+  const [perms, setPerms] = useState<Record<PermKey, boolean>>({
+    can_view_beds: false,
+    can_manage_checkins: false,
+    can_view_complaints: false,
+    can_view_finances: false,
+    can_manage_expenses: false,
+    can_view_reports: false,
   })
+
+  useEffect(() => {
+    if (staff) {
+      setPerms({
+        can_view_beds: staff.can_view_beds,
+        can_manage_checkins: staff.can_manage_checkins,
+        can_view_complaints: staff.can_view_complaints,
+        can_view_finances: staff.can_view_finances,
+        can_manage_expenses: staff.can_manage_expenses,
+        can_view_reports: staff.can_view_reports,
+      })
+    }
+  }, [staff])
+
+  if (loading) return <ListSkeleton rows={3} />
+  if (error) return <div className="text-center py-10"><p className="text-sm text-red-500">Error: {error}</p></div>
 
   if (!staff) {
     return (
@@ -65,14 +90,25 @@ export default function StaffDetail({ staffId }: { staffId: string }) {
     )
   }
 
-  const rc = roleConfig[staff.role]
+  const rc = roleConfig[staff.role as StaffRole] || roleConfig.warden
   const RoleIcon = rc.icon
   const isOwner = staff.role === 'owner'
   const enabledCount = Object.values(perms).filter(Boolean).length
+  const initials = getInitials(staff.name)
 
   const togglePerm = (key: PermKey) => {
     if (isOwner) return
     setPerms((prev) => ({ ...prev, [key]: !prev[key] }))
+  }
+
+  const handleSave = async () => {
+    await updatePermsMut.mutate(staffId, perms)
+    refetch()
+  }
+
+  const handleToggleActive = async () => {
+    await toggleActiveMut.mutate(staffId, !staff.is_active)
+    refetch()
   }
 
   return (
@@ -80,7 +116,7 @@ export default function StaffDetail({ staffId }: { staffId: string }) {
       {/* Profile card */}
       <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 text-center">
         <div className={`w-20 h-20 rounded-full ${rc.bg} flex items-center justify-center mx-auto mb-3`}>
-          <span className={`text-2xl font-bold ${rc.color}`}>{staff.initials}</span>
+          <span className={`text-2xl font-bold ${rc.color}`}>{initials}</span>
         </div>
         <h2 className="text-lg font-bold text-slate-900">{staff.name}</h2>
         <div className="flex items-center justify-center gap-2 mt-1">
@@ -167,11 +203,19 @@ export default function StaffDetail({ staffId }: { staffId: string }) {
       {/* Actions */}
       {!isOwner && (
         <div className="space-y-2">
-          <button className="w-full py-3 bg-primary text-white font-semibold rounded-xl text-sm hover:bg-primary-dark active:scale-[0.98] transition-all">
-            Save Changes
+          <button
+            onClick={handleSave}
+            disabled={updatePermsMut.loading}
+            className="w-full py-3 bg-primary text-white font-semibold rounded-xl text-sm hover:bg-primary-dark active:scale-[0.98] transition-all disabled:opacity-50"
+          >
+            {updatePermsMut.loading ? 'Saving...' : 'Save Changes'}
           </button>
           <div className="flex gap-2">
-            <button className="flex-1 py-2.5 bg-amber-50 text-amber-700 font-semibold rounded-xl text-xs border border-amber-200 hover:bg-amber-100 active:scale-[0.98] transition-all flex items-center justify-center gap-1.5">
+            <button
+              onClick={handleToggleActive}
+              disabled={toggleActiveMut.loading}
+              className="flex-1 py-2.5 bg-amber-50 text-amber-700 font-semibold rounded-xl text-xs border border-amber-200 hover:bg-amber-100 active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
+            >
               <Power className="w-3.5 h-3.5" />
               {staff.is_active ? 'Deactivate' : 'Reactivate'}
             </button>

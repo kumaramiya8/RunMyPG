@@ -4,25 +4,19 @@ import { useState } from 'react'
 import {
   Search,
   IndianRupee,
-  CheckCircle,
-  Clock,
   AlertTriangle,
-  ChevronDown,
   Send,
   Check,
-  Building2,
   Smartphone,
   Banknote,
   CreditCard,
   ArrowLeftRight,
 } from 'lucide-react'
-import {
-  mockInvoices,
-  mockOccupancies,
-  mockTenants,
-  mockBeds,
-  mockRooms,
-} from '@/lib/mock-data'
+import { useAuth } from '@/lib/auth-context'
+import { useQuery } from '@/lib/hooks/use-query'
+import { useMutation } from '@/lib/hooks/use-query'
+import { getInvoices, recordPayment } from '@/lib/services/billing'
+import { ListSkeleton } from '@/components/loading-skeleton'
 
 function formatINR(amount: number): string {
   return new Intl.NumberFormat('en-IN', {
@@ -40,33 +34,63 @@ const paymentMethods = [
 ]
 
 export default function CollectRent() {
+  const { orgId } = useAuth()
   const [search, setSearch] = useState('')
   const [selectedInvoice, setSelectedInvoice] = useState<string | null>(null)
   const [paymentMethod, setPaymentMethod] = useState('upi')
   const [transactionRef, setTransactionRef] = useState('')
   const [confirmed, setConfirmed] = useState(false)
 
-  // Get unpaid invoices
-  const unpaidInvoices = mockInvoices
-    .filter((inv) => inv.status !== 'paid')
-    .map((inv) => {
-      const occ = mockOccupancies.find((o) => o.id === inv.occupancy_id)
-      const tenant = occ ? mockTenants.find((t) => t.id === occ.tenant_id) : undefined
-      const bed = occ ? mockBeds.find((b) => b.id === occ.bed_id) : undefined
-      const room = bed ? mockRooms.find((r) => r.id === bed.room_id) : undefined
-      return { invoice: inv, tenant, room, bed }
+  const { data: invoices, loading, refetch } = useQuery(
+    () => getInvoices(orgId!),
+    [orgId]
+  )
+
+  const { mutate: doRecordPayment, loading: paying } = useMutation(
+    (invoiceId: string, occupancyId: string, amount: number, method: string, ref?: string) =>
+      recordPayment(orgId!, invoiceId, occupancyId, amount, method, ref)
+  )
+
+  if (!orgId || loading) {
+    return <ListSkeleton rows={5} />
+  }
+
+  // Get unpaid invoices with joined data
+  const unpaidInvoices = (invoices || [])
+    .filter((inv: any) => inv.status !== 'paid')
+    .map((inv: any) => {
+      const occ = inv.occupancy
+      const tenant = occ?.tenant
+      const bed = occ?.bed
+      const room = bed?.room
+      return { invoice: inv, tenant, room, bed, occupancy: occ }
     })
 
   const filtered = search
-    ? unpaidInvoices.filter(({ tenant, room }) =>
-        tenant?.full_name.toLowerCase().includes(search.toLowerCase()) ||
-        room?.name.toLowerCase().includes(search.toLowerCase())
+    ? unpaidInvoices.filter(({ tenant, room }: any) =>
+        tenant?.full_name?.toLowerCase().includes(search.toLowerCase()) ||
+        room?.name?.toLowerCase().includes(search.toLowerCase())
       )
     : unpaidInvoices
 
   const selected = selectedInvoice
-    ? unpaidInvoices.find(({ invoice }) => invoice.id === selectedInvoice)
+    ? unpaidInvoices.find(({ invoice }: any) => invoice.id === selectedInvoice)
     : null
+
+  const handleConfirmPayment = async () => {
+    if (!selected) return
+    const result = await doRecordPayment(
+      selected.invoice.id,
+      selected.invoice.occupancy_id,
+      selected.invoice.total_amount,
+      paymentMethod,
+      transactionRef || undefined
+    )
+    if (result !== null) {
+      setConfirmed(true)
+      refetch()
+    }
+  }
 
   if (confirmed && selected) {
     return (
@@ -90,7 +114,7 @@ export default function CollectRent() {
         </div>
         <div className="flex gap-2 mt-6 max-w-xs mx-auto">
           <button
-            onClick={() => { setConfirmed(false); setSelectedInvoice(null) }}
+            onClick={() => { setConfirmed(false); setSelectedInvoice(null); setTransactionRef('') }}
             className="flex-1 py-2.5 bg-primary text-white font-semibold rounded-xl text-sm text-center hover:bg-primary-dark active:scale-[0.98] transition-all"
           >
             Collect Another
@@ -123,7 +147,7 @@ export default function CollectRent() {
           </div>
 
           <div className="space-y-2">
-            {filtered.map(({ invoice, tenant, room, bed }) => {
+            {filtered.map(({ invoice, tenant, room, bed }: any) => {
               const isOverdue = invoice.status === 'overdue'
               return (
                 <button
@@ -133,7 +157,7 @@ export default function CollectRent() {
                 >
                   <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
                     <span className="text-xs font-bold text-primary">
-                      {tenant?.full_name.split(' ').map((n) => n[0]).join('') || '?'}
+                      {tenant?.full_name?.split(' ').map((n: string) => n[0]).join('') || '?'}
                     </span>
                   </div>
                   <div className="flex-1 min-w-0">
@@ -146,7 +170,7 @@ export default function CollectRent() {
                       )}
                     </div>
                     <p className="text-[11px] text-slate-500 mt-0.5">
-                      {room?.name} - {bed?.bed_number} &middot; Due {invoice.due_date.split('-')[2]}/{invoice.due_date.split('-')[1]}
+                      {room?.name} - {bed?.bed_number} &middot; Due {invoice.due_date?.split('-')[2]}/{invoice.due_date?.split('-')[1]}
                     </p>
                   </div>
                   <p className="text-sm font-bold text-slate-900 shrink-0">{formatINR(invoice.total_amount)}</p>
@@ -169,7 +193,7 @@ export default function CollectRent() {
             <div className="flex items-center gap-3 mb-3">
               <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
                 <span className="text-base font-bold text-primary">
-                  {selected.tenant?.full_name.split(' ').map((n) => n[0]).join('')}
+                  {selected.tenant?.full_name?.split(' ').map((n: string) => n[0]).join('')}
                 </span>
               </div>
               <div>
@@ -194,7 +218,7 @@ export default function CollectRent() {
             </div>
 
             <p className="text-[10px] text-slate-400 mt-2 text-center">
-              Invoice {selected.invoice.invoice_number} &middot; Period: Mar 2026
+              Invoice {selected.invoice.invoice_number}
             </p>
           </div>
 
@@ -239,11 +263,12 @@ export default function CollectRent() {
 
           {/* Confirm */}
           <button
-            onClick={() => setConfirmed(true)}
-            className="w-full py-3.5 bg-emerald-600 text-white font-semibold rounded-xl text-sm hover:bg-emerald-700 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+            onClick={handleConfirmPayment}
+            disabled={paying}
+            className="w-full py-3.5 bg-emerald-600 text-white font-semibold rounded-xl text-sm hover:bg-emerald-700 active:scale-[0.98] transition-all flex items-center justify-center gap-2 disabled:opacity-50"
           >
             <Check className="w-4 h-4" />
-            Record Payment of {formatINR(selected.invoice.total_amount)}
+            {paying ? 'Recording...' : `Record Payment of ${formatINR(selected.invoice.total_amount)}`}
           </button>
 
           <p className="text-[11px] text-slate-400 text-center mt-2">

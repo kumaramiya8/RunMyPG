@@ -18,7 +18,13 @@ import {
   ArrowLeft,
 } from 'lucide-react'
 import Link from 'next/link'
-import { mockFloors, mockRooms, mockBeds } from '@/lib/mock-data'
+import { useRouter } from 'next/navigation'
+import { useAuth } from '@/lib/auth-context'
+import { useQuery } from '@/lib/hooks/use-query'
+import { getFullPropertyTree } from '@/lib/services/property'
+import { checkIn } from '@/lib/services/tenants'
+import { ListSkeleton, EmptyState } from '@/components/loading-skeleton'
+import type { Floor, Room, Bed } from '@/lib/types'
 
 // ── Step indicator ──────────────────────────────────────────────────
 
@@ -63,31 +69,125 @@ function FormInput({ label, icon: Icon, ...props }: { label: string; icon: typeo
 // ── Main Form ───────────────────────────────────────────────────────
 
 export default function CheckinForm() {
+  const { orgId } = useAuth()
+  const router = useRouter()
   const [step, setStep] = useState(0)
   const [selectedFloor, setSelectedFloor] = useState('')
   const [selectedRoom, setSelectedRoom] = useState('')
   const [selectedBed, setSelectedBed] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  const vacantBeds = mockBeds.filter((b) => b.status === 'vacant')
-  const availableFloors = mockFloors.filter((f) =>
-    mockRooms.some((r) =>
-      r.floor_id === f.id && mockBeds.some((b) => b.room_id === r.id && b.status === 'vacant')
+  // Form state
+  const [fullName, setFullName] = useState('')
+  const [phone, setPhone] = useState('')
+  const [email, setEmail] = useState('')
+  const [fatherName, setFatherName] = useState('')
+  const [fatherPhone, setFatherPhone] = useState('')
+  const [motherName, setMotherName] = useState('')
+  const [motherPhone, setMotherPhone] = useState('')
+  const [aadhaarNumber, setAadhaarNumber] = useState('')
+  const [occupation, setOccupation] = useState('')
+  const [companyOrCollege, setCompanyOrCollege] = useState('')
+  const [monthlyRent, setMonthlyRent] = useState('')
+  const [depositAmount, setDepositAmount] = useState('')
+  const [rentDueDay, setRentDueDay] = useState('1')
+  const [checkinDate, setCheckinDate] = useState(new Date().toISOString().split('T')[0])
+
+  const { data: property, loading } = useQuery(
+    () => getFullPropertyTree(orgId!),
+    [orgId]
+  )
+
+  if (loading) {
+    return <ListSkeleton rows={4} />
+  }
+
+  const floors = property?.floors ?? []
+  const rooms = property?.rooms ?? []
+  const beds = property?.beds ?? []
+
+  if (floors.length === 0) {
+    return (
+      <EmptyState
+        icon={Building2}
+        title="No property set up yet"
+        description="Go to Property Setup to add buildings before checking in tenants."
+      />
+    )
+  }
+
+  const vacantBeds = beds.filter((b) => b.status === 'vacant')
+  const availableFloors = floors.filter((f) =>
+    rooms.some((r) =>
+      r.floor_id === f.id && beds.some((b) => b.room_id === r.id && b.status === 'vacant')
     )
   )
   const availableRooms = selectedFloor
-    ? mockRooms.filter((r) =>
-        r.floor_id === selectedFloor && mockBeds.some((b) => b.room_id === r.id && b.status === 'vacant')
+    ? rooms.filter((r) =>
+        r.floor_id === selectedFloor && beds.some((b) => b.room_id === r.id && b.status === 'vacant')
       )
     : []
   const availableBeds = selectedRoom
-    ? mockBeds.filter((b) => b.room_id === selectedRoom && b.status === 'vacant')
+    ? beds.filter((b) => b.room_id === selectedRoom && b.status === 'vacant')
     : []
 
-  const selectedRoomData = mockRooms.find((r) => r.id === selectedRoom)
+  const selectedRoomData = rooms.find((r) => r.id === selectedRoom)
+
+  // Set default rent when room is selected
+  const handleRoomSelect = (roomId: string) => {
+    setSelectedRoom(roomId)
+    setSelectedBed('')
+    const room = rooms.find((r) => r.id === roomId)
+    if (room?.base_rent) {
+      setMonthlyRent(String(room.base_rent))
+      setDepositAmount(String(room.base_rent))
+    }
+  }
+
+  const handleSubmit = async () => {
+    if (!orgId || !selectedBed) return
+    setSubmitting(true)
+    setError(null)
+    try {
+      await checkIn(
+        orgId,
+        selectedBed,
+        {
+          fullName,
+          phone,
+          email: email || undefined,
+          fatherName: fatherName || undefined,
+          fatherPhone: fatherPhone || undefined,
+          motherName: motherName || undefined,
+          motherPhone: motherPhone || undefined,
+          aadhaarNumber: aadhaarNumber || undefined,
+          occupation: occupation || undefined,
+          companyOrCollege: companyOrCollege || undefined,
+        },
+        {
+          monthlyRent: Number(monthlyRent),
+          depositAmount: Number(depositAmount),
+          rentDueDay: Number(rentDueDay),
+        }
+      )
+      router.push('/tenants')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Check-in failed. Please try again.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   return (
     <div>
       <StepIndicator currentStep={step} />
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-3 mb-4">
+          <p className="text-xs font-medium text-red-700">{error}</p>
+        </div>
+      )}
 
       {/* Step 0: Select Bed */}
       {step === 0 && (
@@ -123,11 +223,11 @@ export default function CheckinForm() {
               <label className="text-xs font-semibold text-slate-600 mb-1 block">Select Room</label>
               <div className="grid grid-cols-2 gap-2">
                 {availableRooms.map((room) => {
-                  const beds = mockBeds.filter((b) => b.room_id === room.id && b.status === 'vacant')
+                  const roomBeds = beds.filter((b) => b.room_id === room.id && b.status === 'vacant')
                   return (
                     <button
                       key={room.id}
-                      onClick={() => { setSelectedRoom(room.id); setSelectedBed('') }}
+                      onClick={() => handleRoomSelect(room.id)}
                       className={`p-3 rounded-xl border-2 text-left transition-all ${
                         selectedRoom === room.id
                           ? 'border-primary bg-primary/5'
@@ -136,7 +236,7 @@ export default function CheckinForm() {
                     >
                       <p className="text-sm font-semibold text-slate-800">{room.name}</p>
                       <p className="text-[10px] text-slate-500 mt-0.5">
-                        {beds.length} bed{beds.length > 1 ? 's' : ''} free &middot; ₹{room.base_rent?.toLocaleString('en-IN')}
+                        {roomBeds.length} bed{roomBeds.length > 1 ? 's' : ''} free &middot; ₹{room.base_rent?.toLocaleString('en-IN')}
                       </p>
                       <div className="flex gap-1 mt-1.5">
                         {room.has_ac && <span className="text-[9px] bg-blue-50 text-blue-600 px-1 rounded font-medium">AC</span>}
@@ -193,20 +293,20 @@ export default function CheckinForm() {
             </button>
           </div>
 
-          <FormInput label="Full Name" icon={User} placeholder="Enter full name" />
-          <FormInput label="Phone Number" icon={Phone} placeholder="+91 XXXXX XXXXX" type="tel" />
-          <FormInput label="Email (Optional)" icon={Mail} placeholder="email@example.com" type="email" />
+          <FormInput label="Full Name" icon={User} placeholder="Enter full name" value={fullName} onChange={(e) => setFullName(e.target.value)} />
+          <FormInput label="Phone Number" icon={Phone} placeholder="+91 XXXXX XXXXX" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />
+          <FormInput label="Email (Optional)" icon={Mail} placeholder="email@example.com" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
 
           <div>
             <label className="text-xs font-semibold text-slate-600 mb-1 block">Emergency Contact - Father</label>
             <div className="grid grid-cols-2 gap-2">
               <div className="relative">
                 <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <input placeholder="Father's name" className="w-full pl-10 pr-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+                <input placeholder="Father's name" value={fatherName} onChange={(e) => setFatherName(e.target.value)} className="w-full pl-10 pr-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
               </div>
               <div className="relative">
                 <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <input placeholder="Phone" type="tel" className="w-full pl-10 pr-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+                <input placeholder="Phone" type="tel" value={fatherPhone} onChange={(e) => setFatherPhone(e.target.value)} className="w-full pl-10 pr-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
               </div>
             </div>
           </div>
@@ -216,11 +316,11 @@ export default function CheckinForm() {
             <div className="grid grid-cols-2 gap-2">
               <div className="relative">
                 <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <input placeholder="Mother's name" className="w-full pl-10 pr-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+                <input placeholder="Mother's name" value={motherName} onChange={(e) => setMotherName(e.target.value)} className="w-full pl-10 pr-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
               </div>
               <div className="relative">
                 <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <input placeholder="Phone" type="tel" className="w-full pl-10 pr-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+                <input placeholder="Phone" type="tel" value={motherPhone} onChange={(e) => setMotherPhone(e.target.value)} className="w-full pl-10 pr-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
               </div>
             </div>
           </div>
@@ -253,7 +353,7 @@ export default function CheckinForm() {
             </div>
           </div>
 
-          <FormInput label="Aadhaar Number" icon={CreditCard} placeholder="XXXX XXXX XXXX" />
+          <FormInput label="Aadhaar Number" icon={CreditCard} placeholder="XXXX XXXX XXXX" value={aadhaarNumber} onChange={(e) => setAadhaarNumber(e.target.value)} />
 
           <button className="w-full py-2.5 bg-blue-600 text-white font-semibold rounded-xl text-sm hover:bg-blue-700 active:scale-[0.98] transition-all flex items-center justify-center gap-2">
             <Shield className="w-4 h-4" />
@@ -267,7 +367,12 @@ export default function CheckinForm() {
                 {['Working', 'Student', 'Other'].map((occ) => (
                   <button
                     key={occ}
-                    className="flex-1 py-2 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:border-primary hover:text-primary focus:border-primary focus:bg-primary/5 transition-all"
+                    onClick={() => setOccupation(occ)}
+                    className={`flex-1 py-2 rounded-xl border text-sm font-medium transition-all ${
+                      occupation === occ
+                        ? 'border-primary bg-primary/5 text-primary'
+                        : 'border-slate-200 text-slate-600 hover:border-primary hover:text-primary'
+                    }`}
                   >
                     {occ}
                   </button>
@@ -275,7 +380,7 @@ export default function CheckinForm() {
               </div>
             </div>
             <div className="mt-3">
-              <FormInput label="Company / College" icon={Briefcase} placeholder="Name of company or college" />
+              <FormInput label="Company / College" icon={Briefcase} placeholder="Name of company or college" value={companyOrCollege} onChange={(e) => setCompanyOrCollege(e.target.value)} />
             </div>
           </div>
 
@@ -312,7 +417,8 @@ export default function CheckinForm() {
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">₹</span>
               <input
                 type="number"
-                defaultValue={selectedRoomData?.base_rent || 7000}
+                value={monthlyRent}
+                onChange={(e) => setMonthlyRent(e.target.value)}
                 className="w-full pl-7 pr-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
               />
             </div>
@@ -324,7 +430,8 @@ export default function CheckinForm() {
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">₹</span>
               <input
                 type="number"
-                defaultValue={selectedRoomData?.base_rent || 7000}
+                value={depositAmount}
+                onChange={(e) => setDepositAmount(e.target.value)}
                 className="w-full pl-7 pr-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
               />
             </div>
@@ -334,7 +441,11 @@ export default function CheckinForm() {
             <label className="text-xs font-semibold text-slate-600 mb-1 block">Rent Due Day</label>
             <div className="relative">
               <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <select className="w-full pl-10 pr-3 py-2.5 rounded-xl border border-slate-200 text-sm appearance-none bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary">
+              <select
+                value={rentDueDay}
+                onChange={(e) => setRentDueDay(e.target.value)}
+                className="w-full pl-10 pr-3 py-2.5 rounded-xl border border-slate-200 text-sm appearance-none bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+              >
                 {[1, 5, 10, 15, 20, 25].map((d) => (
                   <option key={d} value={d}>{d}{ordinal(d)} of every month</option>
                 ))}
@@ -349,7 +460,8 @@ export default function CheckinForm() {
               <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
               <input
                 type="date"
-                defaultValue={new Date().toISOString().split('T')[0]}
+                value={checkinDate}
+                onChange={(e) => setCheckinDate(e.target.value)}
                 className="w-full pl-10 pr-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
               />
             </div>
@@ -363,10 +475,18 @@ export default function CheckinForm() {
               Back
             </button>
             <button
-              className="flex-[2] py-3 bg-emerald-600 text-white font-semibold rounded-xl text-sm hover:bg-emerald-700 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+              onClick={handleSubmit}
+              disabled={submitting}
+              className="flex-[2] py-3 bg-emerald-600 text-white font-semibold rounded-xl text-sm hover:bg-emerald-700 active:scale-[0.98] transition-all flex items-center justify-center gap-2 disabled:opacity-60"
             >
-              <Check className="w-4 h-4" />
-              Complete Check-In
+              {submitting ? (
+                <span>Checking in...</span>
+              ) : (
+                <>
+                  <Check className="w-4 h-4" />
+                  Complete Check-In
+                </>
+              )}
             </button>
           </div>
         </div>

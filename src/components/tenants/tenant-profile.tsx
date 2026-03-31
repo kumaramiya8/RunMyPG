@@ -17,12 +17,16 @@ import {
   ChevronRight,
 } from 'lucide-react'
 import Link from 'next/link'
-import {
-  mockTenants,
-  mockOccupancies,
-  mockBeds,
-  mockRooms,
-} from '@/lib/mock-data'
+import { useAuth } from '@/lib/auth-context'
+import { useQuery } from '@/lib/hooks/use-query'
+import { getTenantById, getActiveOccupancies } from '@/lib/services/tenants'
+import { ListSkeleton } from '@/components/loading-skeleton'
+import type { Occupancy, Tenant, Bed, Room } from '@/lib/types'
+
+interface OccupancyWithJoins extends Occupancy {
+  tenant: Tenant
+  bed: Bed & { room: Room }
+}
 
 function InfoRow({ icon: Icon, label, value, color }: { icon: typeof User; label: string; value: string; color?: string }) {
   return (
@@ -39,10 +43,23 @@ function InfoRow({ icon: Icon, label, value, color }: { icon: typeof User; label
 }
 
 export default function TenantProfile({ tenantId }: { tenantId: string }) {
-  const tenant = mockTenants.find((t) => t.id === tenantId)
-  const occupancy = mockOccupancies.find((o) => o.tenant_id === tenantId && o.status !== 'checked_out')
-  const bed = occupancy ? mockBeds.find((b) => b.id === occupancy.bed_id) : undefined
-  const room = bed ? mockRooms.find((r) => r.id === bed.room_id) : undefined
+  const { orgId } = useAuth()
+
+  const { data: tenant, loading: tenantLoading } = useQuery(
+    () => getTenantById(tenantId),
+    [tenantId]
+  )
+
+  const { data: allOccupancies, loading: occLoading } = useQuery(
+    () => getActiveOccupancies(orgId!),
+    [orgId]
+  )
+
+  const loading = tenantLoading || occLoading
+
+  if (loading) {
+    return <ListSkeleton rows={4} />
+  }
 
   if (!tenant) {
     return (
@@ -55,13 +72,18 @@ export default function TenantProfile({ tenantId }: { tenantId: string }) {
     )
   }
 
+  const occupancies = (allOccupancies ?? []) as OccupancyWithJoins[]
+  const occupancy = occupancies.find((o) => o.tenant_id === tenantId)
+  const bed = occupancy?.bed
+  const room = bed?.room
+
   return (
     <div className="space-y-4">
       {/* Header card */}
       <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 text-center">
         <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-3">
           <span className="text-2xl font-bold text-primary">
-            {tenant.full_name.split(' ').map((n) => n[0]).join('')}
+            {tenant.full_name.split(' ').map((n: string) => n[0]).join('')}
           </span>
         </div>
         <h2 className="text-lg font-bold text-slate-900">{tenant.full_name}</h2>

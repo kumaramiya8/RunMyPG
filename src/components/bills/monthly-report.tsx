@@ -21,7 +21,10 @@ import {
   BedDouble,
   Users,
 } from 'lucide-react'
-import { getFinancialSummary, getBedStats, mockInvoices, mockTenants, mockOccupancies } from '@/lib/mock-data'
+import { useAuth } from '@/lib/auth-context'
+import { useQuery } from '@/lib/hooks/use-query'
+import { getFinancialSummary, getInvoices } from '@/lib/services/billing'
+import { CardSkeleton, ListSkeleton } from '@/components/loading-skeleton'
 
 function formatINR(amount: number): string {
   return new Intl.NumberFormat('en-IN', {
@@ -58,42 +61,69 @@ const categoryColors: Record<string, string> = {
 }
 
 export default function MonthlyReport() {
-  const summary = getFinancialSummary()
-  const bedStats = getBedStats()
-  const occupancyRate = Math.round(((bedStats.occupied + bedStats.notice) / bedStats.total) * 100)
-  const paidCount = mockInvoices.filter((i) => i.status === 'paid').length
-  const overdueCount = mockInvoices.filter((i) => i.status === 'overdue').length
-  const activeTenantsCount = mockOccupancies.filter((o) => o.status !== 'checked_out').length
+  const { orgId } = useAuth()
+
+  const { data: summary, loading: summaryLoading } = useQuery(
+    () => getFinancialSummary(orgId!),
+    [orgId]
+  )
+
+  const { data: invoices, loading: invoicesLoading } = useQuery(
+    () => getInvoices(orgId!),
+    [orgId]
+  )
+
+  if (!orgId || summaryLoading || invoicesLoading) {
+    return (
+      <div className="space-y-4">
+        <CardSkeleton />
+        <div className="grid grid-cols-3 gap-3">
+          <CardSkeleton /><CardSkeleton /><CardSkeleton />
+        </div>
+        <CardSkeleton />
+        <CardSkeleton />
+      </div>
+    )
+  }
+
+  const fin = summary || { totalRentExpected: 0, rentCollected: 0, rentPending: 0, rentOverdue: 0, totalExpenses: 0, netProfit: 0, expensesByCategory: {}, invoices: [], expenses: [] }
+  const allInvoices = invoices || []
+
+  const paidCount = allInvoices.filter((i: any) => i.status === 'paid').length
+  const overdueCount = allInvoices.filter((i: any) => i.status === 'overdue').length
 
   // Sort expenses by amount descending
-  const sortedExpenses = Object.entries(summary.expensesByCategory)
-    .sort(([, a], [, b]) => b - a)
+  const sortedExpenses = Object.entries(fin.expensesByCategory)
+    .sort(([, a], [, b]) => (b as number) - (a as number))
+
+  // Get current month name
+  const monthLabel = new Date().toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
 
   return (
     <div className="space-y-4">
       {/* Header card */}
-      <div className={`rounded-2xl p-5 shadow-lg ${summary.netProfit >= 0 ? 'bg-gradient-to-br from-emerald-600 to-emerald-800' : 'bg-gradient-to-br from-red-600 to-red-800'} text-white`}>
+      <div className={`rounded-2xl p-5 shadow-lg ${fin.netProfit >= 0 ? 'bg-gradient-to-br from-emerald-600 to-emerald-800' : 'bg-gradient-to-br from-red-600 to-red-800'} text-white`}>
         <div className="flex items-center justify-between mb-1">
-          <h3 className="text-sm font-semibold text-white/70">March 2026 &mdash; Net Profit</h3>
-          {summary.netProfit >= 0 ? (
+          <h3 className="text-sm font-semibold text-white/70">{monthLabel} &mdash; Net Profit</h3>
+          {fin.netProfit >= 0 ? (
             <TrendingUp className="w-5 h-5 text-white/50" />
           ) : (
             <TrendingDown className="w-5 h-5 text-white/50" />
           )}
         </div>
-        <p className="text-3xl font-bold">{formatINR(summary.netProfit)}</p>
+        <p className="text-3xl font-bold">{formatINR(fin.netProfit)}</p>
         <div className="grid grid-cols-2 gap-4 mt-4">
           <div>
             <p className="text-[11px] text-white/50 font-medium">Total Revenue</p>
             <p className="text-lg font-bold flex items-center gap-1">
-              {formatCompact(summary.rentCollected)}
+              {formatCompact(fin.rentCollected)}
               <ArrowUpRight className="w-4 h-4 text-emerald-300" />
             </p>
           </div>
           <div>
             <p className="text-[11px] text-white/50 font-medium">Total Expenses</p>
             <p className="text-lg font-bold flex items-center gap-1">
-              {formatCompact(summary.totalExpenses)}
+              {formatCompact(fin.totalExpenses)}
               <ArrowDownRight className="w-4 h-4 text-red-300" />
             </p>
           </div>
@@ -104,17 +134,17 @@ export default function MonthlyReport() {
       <div className="grid grid-cols-3 gap-3">
         <div className="bg-white rounded-xl p-3 shadow-sm border border-slate-100 text-center">
           <BedDouble className="w-5 h-5 text-primary mx-auto mb-1" />
-          <p className="text-lg font-bold text-slate-900">{occupancyRate}%</p>
-          <p className="text-[10px] text-slate-400 font-medium">Occupancy</p>
+          <p className="text-lg font-bold text-slate-900">{allInvoices.length}</p>
+          <p className="text-[10px] text-slate-400 font-medium">Invoices</p>
         </div>
         <div className="bg-white rounded-xl p-3 shadow-sm border border-slate-100 text-center">
           <Users className="w-5 h-5 text-blue-500 mx-auto mb-1" />
-          <p className="text-lg font-bold text-slate-900">{activeTenantsCount}</p>
-          <p className="text-[10px] text-slate-400 font-medium">Active Tenants</p>
+          <p className="text-lg font-bold text-slate-900">{paidCount}</p>
+          <p className="text-[10px] text-slate-400 font-medium">Paid</p>
         </div>
         <div className="bg-white rounded-xl p-3 shadow-sm border border-slate-100 text-center">
           <IndianRupee className="w-5 h-5 text-amber-500 mx-auto mb-1" />
-          <p className="text-lg font-bold text-slate-900">{formatCompact(summary.totalRentExpected)}</p>
+          <p className="text-lg font-bold text-slate-900">{formatCompact(fin.totalRentExpected)}</p>
           <p className="text-[10px] text-slate-400 font-medium">Expected Rent</p>
         </div>
       </div>
@@ -124,20 +154,22 @@ export default function MonthlyReport() {
         <h3 className="text-sm font-semibold text-slate-900 mb-3">Rent Collection</h3>
 
         {/* Progress bar */}
-        <div className="h-4 bg-slate-100 rounded-full overflow-hidden flex mb-3">
-          <div
-            className="bg-emerald-400 transition-all"
-            style={{ width: `${(summary.rentCollected / summary.totalRentExpected) * 100}%` }}
-          />
-          <div
-            className="bg-amber-400 transition-all"
-            style={{ width: `${(summary.rentPending / summary.totalRentExpected) * 100}%` }}
-          />
-          <div
-            className="bg-red-400 transition-all"
-            style={{ width: `${(summary.rentOverdue / summary.totalRentExpected) * 100}%` }}
-          />
-        </div>
+        {fin.totalRentExpected > 0 && (
+          <div className="h-4 bg-slate-100 rounded-full overflow-hidden flex mb-3">
+            <div
+              className="bg-emerald-400 transition-all"
+              style={{ width: `${(fin.rentCollected / fin.totalRentExpected) * 100}%` }}
+            />
+            <div
+              className="bg-amber-400 transition-all"
+              style={{ width: `${(fin.rentPending / fin.totalRentExpected) * 100}%` }}
+            />
+            <div
+              className="bg-red-400 transition-all"
+              style={{ width: `${(fin.rentOverdue / fin.totalRentExpected) * 100}%` }}
+            />
+          </div>
+        )}
 
         <div className="space-y-2">
           <div className="flex items-center justify-between">
@@ -145,62 +177,64 @@ export default function MonthlyReport() {
               <CheckCircle className="w-4 h-4 text-emerald-500" />
               <span className="text-sm text-slate-600">Collected ({paidCount} tenants)</span>
             </div>
-            <span className="text-sm font-bold text-slate-900">{formatINR(summary.rentCollected)}</span>
+            <span className="text-sm font-bold text-slate-900">{formatINR(fin.rentCollected)}</span>
           </div>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Clock className="w-4 h-4 text-amber-500" />
               <span className="text-sm text-slate-600">Pending</span>
             </div>
-            <span className="text-sm font-bold text-amber-600">{formatINR(summary.rentPending)}</span>
+            <span className="text-sm font-bold text-amber-600">{formatINR(fin.rentPending)}</span>
           </div>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <AlertTriangle className="w-4 h-4 text-red-500" />
               <span className="text-sm text-slate-600">Overdue ({overdueCount} tenants)</span>
             </div>
-            <span className="text-sm font-bold text-red-600">{formatINR(summary.rentOverdue)}</span>
+            <span className="text-sm font-bold text-red-600">{formatINR(fin.rentOverdue)}</span>
           </div>
         </div>
       </div>
 
       {/* Expense Breakdown */}
-      <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-slate-900">Expense Breakdown</h3>
-          <span className="text-xs font-bold text-slate-500">{formatINR(summary.totalExpenses)}</span>
-        </div>
+      {sortedExpenses.length > 0 && (
+        <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-slate-900">Expense Breakdown</h3>
+            <span className="text-xs font-bold text-slate-500">{formatINR(fin.totalExpenses)}</span>
+          </div>
 
-        <div className="space-y-3">
-          {sortedExpenses.map(([category, amount]) => {
-            const Icon = categoryIcons[category] || HelpCircle
-            const color = categoryColors[category] || 'bg-slate-100 text-slate-500'
-            const pct = Math.round((amount / summary.totalExpenses) * 100)
-            return (
-              <div key={category}>
-                <div className="flex items-center justify-between mb-1">
-                  <div className="flex items-center gap-2">
-                    <div className={`p-1 rounded ${color}`}>
-                      <Icon className="w-3 h-3" />
+          <div className="space-y-3">
+            {sortedExpenses.map(([category, amount]) => {
+              const Icon = categoryIcons[category] || HelpCircle
+              const color = categoryColors[category] || 'bg-slate-100 text-slate-500'
+              const pct = fin.totalExpenses > 0 ? Math.round(((amount as number) / fin.totalExpenses) * 100) : 0
+              return (
+                <div key={category}>
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-2">
+                      <div className={`p-1 rounded ${color}`}>
+                        <Icon className="w-3 h-3" />
+                      </div>
+                      <span className="text-sm text-slate-700 font-medium">{category}</span>
                     </div>
-                    <span className="text-sm text-slate-700 font-medium">{category}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-slate-400">{pct}%</span>
+                      <span className="text-sm font-bold text-slate-900">{formatINR(amount as number)}</span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-slate-400">{pct}%</span>
-                    <span className="text-sm font-bold text-slate-900">{formatINR(amount)}</span>
+                  <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full ${color.split(' ')[0]}`}
+                      style={{ width: `${pct}%` }}
+                    />
                   </div>
                 </div>
-                <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full ${color.split(' ')[0]}`}
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
-              </div>
-            )
-          })}
+              )
+            })}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Download Report */}
       <button className="w-full py-3 bg-slate-900 text-white font-semibold rounded-xl text-sm hover:bg-slate-800 active:scale-[0.98] transition-all flex items-center justify-center gap-2">

@@ -15,12 +15,13 @@ import {
   Calendar,
   MessageSquare,
   UserCog,
-  ChevronDown,
   Check,
-  X,
   Send,
 } from 'lucide-react'
-import { mockComplaints, mockTenants, mockRooms } from '@/lib/mock-data'
+import { useQuery } from '@/lib/hooks/use-query'
+import { useMutation } from '@/lib/hooks/use-query'
+import { getComplaintById, updateComplaintStatus } from '@/lib/services/complaints'
+import { CardSkeleton } from '@/components/loading-skeleton'
 import type { ComplaintStatus } from '@/lib/types'
 
 const categoryIcons: Record<string, typeof Zap> = {
@@ -57,8 +58,7 @@ function formatDateTime(dateStr: string): string {
   })
 }
 
-// Mock activity timeline
-function getTimeline(complaint: typeof mockComplaints[0]) {
+function getTimeline(complaint: any) {
   const items = [
     { time: complaint.created_at, label: 'Complaint submitted', icon: AlertTriangle, color: 'text-red-500' },
   ]
@@ -94,8 +94,25 @@ export default function ComplaintDetail({ complaintId }: { complaintId: string }
   const [assignee, setAssignee] = useState('')
   const [note, setNote] = useState('')
 
-  const complaint = mockComplaints.find((c) => c.id === complaintId)
-  if (!complaint) {
+  const { data: complaint, loading, error, refetch } = useQuery(
+    () => getComplaintById(complaintId),
+    [complaintId]
+  )
+
+  const { mutate: doUpdateStatus, loading: updating } = useMutation(
+    (status: string, assigned?: string) => updateComplaintStatus(complaintId, status, assigned)
+  )
+
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        <CardSkeleton />
+        <CardSkeleton />
+      </div>
+    )
+  }
+
+  if (error || !complaint) {
     return (
       <div className="text-center py-10">
         <p className="text-sm text-slate-400">Complaint not found</p>
@@ -103,14 +120,28 @@ export default function ComplaintDetail({ complaintId }: { complaintId: string }
     )
   }
 
-  const tenant = complaint.tenant_id ? mockTenants.find((t) => t.id === complaint.tenant_id) : undefined
-  const room = complaint.room_id ? mockRooms.find((r) => r.id === complaint.room_id) : undefined
+  const tenantName = (complaint as any).tenant?.full_name || 'Unknown'
+  const tenantPhone = (complaint as any).tenant?.phone || ''
+  const roomName = (complaint as any).room?.name || 'Unknown'
   const CatIcon = categoryIcons[complaint.category] || AlertTriangle
   const catColor = categoryColors[complaint.category] || 'bg-slate-50 text-slate-500'
-  const stCfg = statusConfig[complaint.status]
+  const stCfg = statusConfig[complaint.status as ComplaintStatus]
   const StatusIcon = stCfg.icon
   const priCfg = priorityConfig[complaint.priority] || priorityConfig.medium
   const timeline = getTimeline(complaint)
+
+  const handleResolve = async () => {
+    await doUpdateStatus('resolved')
+    refetch()
+  }
+
+  const handleAssign = async () => {
+    if (!assignee) return
+    await doUpdateStatus(complaint.status === 'open' ? 'in_progress' : complaint.status, assignee)
+    setShowAssign(false)
+    setAssignee('')
+    refetch()
+  }
 
   return (
     <div className="space-y-4">
@@ -142,13 +173,13 @@ export default function ComplaintDetail({ complaintId }: { complaintId: string }
               <div className="flex items-center gap-1 text-[10px] text-slate-400 mb-0.5">
                 <Building2 className="w-3 h-3" /> Location
               </div>
-              <p className="text-xs font-semibold text-slate-700">{room?.name || 'Unknown'}</p>
+              <p className="text-xs font-semibold text-slate-700">{roomName}</p>
             </div>
             <div className="bg-slate-50 rounded-lg p-2.5">
               <div className="flex items-center gap-1 text-[10px] text-slate-400 mb-0.5">
                 <User className="w-3 h-3" /> Reported by
               </div>
-              <p className="text-xs font-semibold text-slate-700">{tenant?.full_name || 'Unknown'}</p>
+              <p className="text-xs font-semibold text-slate-700">{tenantName}</p>
             </div>
             <div className="bg-slate-50 rounded-lg p-2.5">
               <div className="flex items-center gap-1 text-[10px] text-slate-400 mb-0.5">
@@ -217,8 +248,12 @@ export default function ComplaintDetail({ complaintId }: { complaintId: string }
                     onChange={(e) => setAssignee(e.target.value)}
                     className="flex-1 px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
                   />
-                  <button className="px-4 py-2.5 bg-amber-500 text-white font-semibold rounded-xl text-sm hover:bg-amber-600 active:scale-[0.98] transition-all">
-                    Assign
+                  <button
+                    onClick={handleAssign}
+                    disabled={updating || !assignee}
+                    className="px-4 py-2.5 bg-amber-500 text-white font-semibold rounded-xl text-sm hover:bg-amber-600 active:scale-[0.98] transition-all disabled:opacity-50"
+                  >
+                    {updating ? '...' : 'Assign'}
                   </button>
                 </div>
               )}
@@ -240,9 +275,13 @@ export default function ComplaintDetail({ complaintId }: { complaintId: string }
           </div>
 
           {/* Mark resolved */}
-          <button className="w-full py-3 bg-emerald-600 text-white font-semibold rounded-xl text-sm hover:bg-emerald-700 active:scale-[0.98] transition-all flex items-center justify-center gap-2">
+          <button
+            onClick={handleResolve}
+            disabled={updating}
+            className="w-full py-3 bg-emerald-600 text-white font-semibold rounded-xl text-sm hover:bg-emerald-700 active:scale-[0.98] transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+          >
             <CheckCircle className="w-4 h-4" />
-            Mark as Resolved
+            {updating ? 'Updating...' : 'Mark as Resolved'}
           </button>
         </div>
       )}

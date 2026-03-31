@@ -13,14 +13,10 @@ import {
   Receipt,
   TrendingUp,
 } from 'lucide-react'
-import {
-  mockInvoices,
-  mockOccupancies,
-  mockTenants,
-  mockBeds,
-  mockRooms,
-  getFinancialSummary,
-} from '@/lib/mock-data'
+import { useAuth } from '@/lib/auth-context'
+import { useQuery } from '@/lib/hooks/use-query'
+import { getFinancialSummary, getInvoices } from '@/lib/services/billing'
+import { ListSkeleton, CardSkeleton } from '@/components/loading-skeleton'
 import type { InvoiceStatus } from '@/lib/types'
 
 function formatINR(amount: number): string {
@@ -47,35 +43,59 @@ const statusConfig: Record<InvoiceStatus, { icon: typeof CheckCircle; label: str
 type FilterType = 'all' | 'pending' | 'overdue' | 'paid'
 
 export default function BillsOverview() {
+  const { orgId } = useAuth()
   const [filter, setFilter] = useState<FilterType>('all')
   const [search, setSearch] = useState('')
-  const summary = getFinancialSummary()
 
-  // Enrich invoices
-  const enrichedInvoices = mockInvoices.map((inv) => {
-    const occ = mockOccupancies.find((o) => o.id === inv.occupancy_id)
-    const tenant = occ ? mockTenants.find((t) => t.id === occ.tenant_id) : undefined
-    const bed = occ ? mockBeds.find((b) => b.id === occ.bed_id) : undefined
-    const room = bed ? mockRooms.find((r) => r.id === bed.room_id) : undefined
+  const { data: summary, loading: summaryLoading } = useQuery(
+    () => getFinancialSummary(orgId!),
+    [orgId]
+  )
+
+  const { data: invoices, loading: invoicesLoading } = useQuery(
+    () => getInvoices(orgId!),
+    [orgId]
+  )
+
+  if (!orgId || summaryLoading || invoicesLoading) {
+    return (
+      <div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+          {Array.from({ length: 4 }, (_, i) => <CardSkeleton key={i} />)}
+        </div>
+        <ListSkeleton rows={5} />
+      </div>
+    )
+  }
+
+  const allInvoices = invoices || []
+  const fin = summary || { rentCollected: 0, rentPending: 0, rentOverdue: 0, netProfit: 0, totalRentExpected: 0, totalExpenses: 0, expensesByCategory: {}, invoices: [], expenses: [] }
+
+  // Enrich invoices from the joined query
+  const enrichedInvoices = allInvoices.map((inv: any) => {
+    const occ = inv.occupancy
+    const tenant = occ?.tenant
+    const bed = occ?.bed
+    const room = bed?.room
     return { invoice: inv, tenant, room, bed, occupancy: occ }
   })
 
-  const filtered = enrichedInvoices.filter(({ invoice, tenant, room }) => {
+  const filtered = enrichedInvoices.filter(({ invoice, tenant, room }: any) => {
     const matchesFilter =
       filter === 'all' ? true :
       filter === 'pending' ? (invoice.status === 'pending' || invoice.status === 'partially_paid') :
       filter === 'overdue' ? invoice.status === 'overdue' :
       invoice.status === 'paid'
     const matchesSearch = !search ||
-      tenant?.full_name.toLowerCase().includes(search.toLowerCase()) ||
-      room?.name.toLowerCase().includes(search.toLowerCase()) ||
-      invoice.invoice_number.toLowerCase().includes(search.toLowerCase())
+      tenant?.full_name?.toLowerCase().includes(search.toLowerCase()) ||
+      room?.name?.toLowerCase().includes(search.toLowerCase()) ||
+      invoice.invoice_number?.toLowerCase().includes(search.toLowerCase())
     return matchesFilter && matchesSearch
   })
 
-  const paidCount = mockInvoices.filter((i) => i.status === 'paid').length
-  const pendingCount = mockInvoices.filter((i) => i.status === 'pending' || i.status === 'partially_paid').length
-  const overdueCount = mockInvoices.filter((i) => i.status === 'overdue').length
+  const paidCount = allInvoices.filter((i: any) => i.status === 'paid').length
+  const pendingCount = allInvoices.filter((i: any) => i.status === 'pending' || i.status === 'partially_paid').length
+  const overdueCount = allInvoices.filter((i: any) => i.status === 'overdue').length
 
   return (
     <div>
@@ -88,7 +108,7 @@ export default function BillsOverview() {
             </div>
             <span className="text-[10px] font-semibold text-slate-400 uppercase">Collected</span>
           </div>
-          <p className="text-xl font-bold text-slate-900">{formatCompact(summary.rentCollected)}</p>
+          <p className="text-xl font-bold text-slate-900">{formatCompact(fin.rentCollected)}</p>
           <p className="text-[10px] text-emerald-600 font-medium mt-0.5">{paidCount} tenants paid</p>
         </div>
 
@@ -99,7 +119,7 @@ export default function BillsOverview() {
             </div>
             <span className="text-[10px] font-semibold text-slate-400 uppercase">Pending</span>
           </div>
-          <p className="text-xl font-bold text-slate-900">{formatCompact(summary.rentPending)}</p>
+          <p className="text-xl font-bold text-slate-900">{formatCompact(fin.rentPending)}</p>
           <p className="text-[10px] text-amber-600 font-medium mt-0.5">{pendingCount} awaiting</p>
         </div>
 
@@ -110,7 +130,7 @@ export default function BillsOverview() {
             </div>
             <span className="text-[10px] font-semibold text-slate-400 uppercase">Overdue</span>
           </div>
-          <p className="text-xl font-bold text-slate-900">{formatCompact(summary.rentOverdue)}</p>
+          <p className="text-xl font-bold text-slate-900">{formatCompact(fin.rentOverdue)}</p>
           <p className="text-[10px] text-red-600 font-medium mt-0.5">{overdueCount} overdue</p>
         </div>
 
@@ -121,8 +141,8 @@ export default function BillsOverview() {
             </div>
             <span className="text-[10px] font-semibold text-slate-400 uppercase">Net Profit</span>
           </div>
-          <p className={`text-xl font-bold ${summary.netProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-            {formatCompact(summary.netProfit)}
+          <p className={`text-xl font-bold ${fin.netProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+            {formatCompact(fin.netProfit)}
           </p>
           <p className="text-[10px] text-slate-400 font-medium mt-0.5">After expenses</p>
         </div>
@@ -168,7 +188,7 @@ export default function BillsOverview() {
       {/* Filter chips */}
       <div className="flex gap-2 mb-4">
         {[
-          { key: 'all' as const, label: 'All', count: mockInvoices.length },
+          { key: 'all' as const, label: 'All', count: allInvoices.length },
           { key: 'pending' as const, label: 'Pending', count: pendingCount },
           { key: 'overdue' as const, label: 'Overdue', count: overdueCount },
           { key: 'paid' as const, label: 'Paid', count: paidCount },
@@ -189,8 +209,8 @@ export default function BillsOverview() {
 
       {/* Invoice List */}
       <div className="space-y-2">
-        {filtered.map(({ invoice, tenant, room, bed }) => {
-          const cfg = statusConfig[invoice.status]
+        {filtered.map(({ invoice, tenant, room, bed }: any) => {
+          const cfg = statusConfig[invoice.status as InvoiceStatus]
           const StatusIcon = cfg.icon
           return (
             <Link
@@ -201,7 +221,7 @@ export default function BillsOverview() {
               {/* Avatar */}
               <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
                 <span className="text-xs font-bold text-primary">
-                  {tenant?.full_name.split(' ').map((n) => n[0]).join('') || '?'}
+                  {tenant?.full_name?.split(' ').map((n: string) => n[0]).join('') || '?'}
                 </span>
               </div>
 
@@ -216,7 +236,7 @@ export default function BillsOverview() {
                   <Building2 className="w-3 h-3" />
                   <span>{room?.name}{bed ? ` - ${bed.bed_number}` : ''}</span>
                   <span className="text-slate-300">|</span>
-                  <span>Due {invoice.due_date.split('-').reverse().slice(0, 2).join('/')}</span>
+                  <span>Due {invoice.due_date?.split('-').reverse().slice(0, 2).join('/')}</span>
                 </div>
               </div>
 

@@ -13,15 +13,14 @@ import {
   MessageSquare,
   Zap,
 } from 'lucide-react'
-import { mockFloors, mockBuilding, mockTenants, mockOccupancies } from '@/lib/mock-data'
+import { useAuth } from '@/lib/auth-context'
+import { useQuery, useMutation } from '@/lib/hooks/use-query'
+import { getActiveOccupancies } from '@/lib/services/tenants'
+import { getFullPropertyTree } from '@/lib/services/property'
+import { sendBroadcast } from '@/lib/services/messages'
+import { ListSkeleton } from '@/components/loading-skeleton'
 
-type RecipientScope = 'all' | 'building' | 'floor' | 'individual'
-
-const scopes = [
-  { key: 'all' as const, label: 'All Tenants', desc: 'Send to everyone in the building', icon: Users, count: 39 },
-  { key: 'floor' as const, label: 'Specific Floor', desc: 'Select a floor to message', icon: Layers, count: null },
-  { key: 'individual' as const, label: 'Individual', desc: 'Send to one tenant', icon: User, count: null },
-]
+type RecipientScope = 'all' | 'floor' | 'individual'
 
 const templates = [
   { id: 't1', label: 'Water Supply Disruption', content: 'No water supply from {TIME} due to {REASON}. Please store water in advance. Sorry for the inconvenience.' },
@@ -32,19 +31,53 @@ const templates = [
 ]
 
 export default function BroadcastComposer() {
+  const { orgId } = useAuth()
   const [scope, setScope] = useState<RecipientScope | ''>('')
   const [selectedFloor, setSelectedFloor] = useState('')
   const [selectedTenant, setSelectedTenant] = useState('')
   const [message, setMessage] = useState('')
   const [sent, setSent] = useState(false)
 
-  const activeTenants = mockTenants.filter((t) =>
-    mockOccupancies.some((o) => o.tenant_id === t.id && o.status !== 'checked_out')
+  const { data: occupancies, loading: occLoading } = useQuery(
+    () => getActiveOccupancies(orgId!),
+    [orgId]
   )
 
+  const { data: tree, loading: treeLoading } = useQuery(
+    () => getFullPropertyTree(orgId!),
+    [orgId]
+  )
+
+  const sendMut = useMutation(sendBroadcast)
+
+  const loading = occLoading || treeLoading
+  if (!orgId) return null
+  if (loading) return <ListSkeleton rows={3} />
+
+  const floors = tree?.floors || []
+  const activeTenants = (occupancies || []).map((o: any) => ({
+    id: o.tenant?.id,
+    full_name: o.tenant?.full_name || 'Unknown',
+  })).filter((t: any) => t.id)
+
+  const scopes = [
+    { key: 'all' as const, label: 'All Tenants', desc: 'Send to everyone in the building', icon: Users, count: activeTenants.length },
+    { key: 'floor' as const, label: 'Specific Floor', desc: 'Select a floor to message', icon: Layers, count: null },
+    { key: 'individual' as const, label: 'Individual', desc: 'Send to one tenant', icon: User, count: null },
+  ]
+
   const recipientCount = scope === 'all' ? activeTenants.length
-    : scope === 'floor' ? Math.floor(activeTenants.length / mockFloors.length)
+    : scope === 'floor' ? Math.floor(activeTenants.length / Math.max(floors.length, 1))
     : scope === 'individual' ? 1 : 0
+
+  const handleSend = async () => {
+    if (!orgId || !message || !scope) return
+    const recipientId = scope === 'individual' ? selectedTenant : scope === 'floor' ? selectedFloor : null
+    const result = await sendMut.mutate(orgId, scope, recipientId, 'announcement', message)
+    if (result) {
+      setSent(true)
+    }
+  }
 
   if (sent) {
     return (
@@ -124,7 +157,7 @@ export default function BroadcastComposer() {
               className="w-full pl-10 pr-8 py-2.5 rounded-xl border border-slate-200 text-sm appearance-none bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
             >
               <option value="">Choose a floor...</option>
-              {mockFloors.map((f) => (
+              {floors.map((f: any) => (
                 <option key={f.id} value={f.id}>{f.name}</option>
               ))}
             </select>
@@ -145,7 +178,7 @@ export default function BroadcastComposer() {
               className="w-full pl-10 pr-8 py-2.5 rounded-xl border border-slate-200 text-sm appearance-none bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
             >
               <option value="">Choose a tenant...</option>
-              {activeTenants.map((t) => (
+              {activeTenants.map((t: any) => (
                 <option key={t.id} value={t.id}>{t.full_name}</option>
               ))}
             </select>
@@ -194,6 +227,13 @@ export default function BroadcastComposer() {
         </div>
       )}
 
+      {/* Error display */}
+      {sendMut.error && (
+        <div className="bg-red-50 text-red-600 text-xs rounded-xl p-3 border border-red-100">
+          {sendMut.error}
+        </div>
+      )}
+
       {/* Preview & Send */}
       {scope && message && (
         <div>
@@ -213,11 +253,12 @@ export default function BroadcastComposer() {
           </div>
 
           <button
-            onClick={() => setSent(true)}
-            className="w-full py-3.5 bg-emerald-600 text-white font-semibold rounded-xl text-sm hover:bg-emerald-700 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+            onClick={handleSend}
+            disabled={sendMut.loading}
+            className="w-full py-3.5 bg-emerald-600 text-white font-semibold rounded-xl text-sm hover:bg-emerald-700 active:scale-[0.98] transition-all flex items-center justify-center gap-2 disabled:opacity-50"
           >
             <Send className="w-4 h-4" />
-            Send via WhatsApp
+            {sendMut.loading ? 'Sending...' : 'Send via WhatsApp'}
           </button>
         </div>
       )}

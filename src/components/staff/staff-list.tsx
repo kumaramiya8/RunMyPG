@@ -11,11 +11,13 @@ import {
   ShieldCheck,
   ShieldAlert,
   ChefHat,
+  Users,
 } from 'lucide-react'
 import type { StaffRole } from '@/lib/types'
-
-import { mockStaff } from '@/lib/mock-data'
-import type { MockStaff } from '@/lib/mock-data'
+import { useAuth } from '@/lib/auth-context'
+import { useQuery } from '@/lib/hooks/use-query'
+import { getStaffMembers } from '@/lib/services/staff'
+import { ListSkeleton, EmptyState } from '@/components/loading-skeleton'
 
 const roleConfig: Record<StaffRole, { label: string; icon: typeof Crown; color: string; bg: string }> = {
   owner: { label: 'Owner', icon: Crown, color: 'text-amber-600', bg: 'bg-amber-50' },
@@ -25,13 +27,32 @@ const roleConfig: Record<StaffRole, { label: string; icon: typeof Crown; color: 
   cook: { label: 'Cook', icon: ChefHat, color: 'text-orange-600', bg: 'bg-orange-50' },
 }
 
-function permissionCount(staff: MockStaff): number {
+function getInitials(name: string): string {
+  return name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
+}
+
+function permissionCount(staff: any): number {
   return [staff.can_view_beds, staff.can_manage_checkins, staff.can_view_complaints, staff.can_view_finances, staff.can_manage_expenses, staff.can_view_reports].filter(Boolean).length
 }
 
 export default function StaffList() {
-  const activeStaff = mockStaff.filter((s) => s.is_active)
-  const inactiveStaff = mockStaff.filter((s) => !s.is_active)
+  const { orgId } = useAuth()
+  const { data: staffList, loading, error } = useQuery(
+    () => getStaffMembers(orgId!),
+    [orgId]
+  )
+
+  if (!orgId) return null
+  if (loading) return <ListSkeleton rows={5} />
+  if (error) return <div className="text-center py-10"><p className="text-sm text-red-500">Error: {error}</p></div>
+
+  const allStaff = staffList || []
+  const activeStaff = allStaff.filter((s: any) => s.is_active)
+  const inactiveStaff = allStaff.filter((s: any) => !s.is_active)
+
+  if (allStaff.length === 0) {
+    return <EmptyState icon={Users} title="No Staff Members" description="Invite your first staff member to get started" />
+  }
 
   return (
     <div>
@@ -46,7 +67,7 @@ export default function StaffList() {
           <p className="text-[10px] text-slate-400 font-medium">Inactive</p>
         </div>
         <div className="bg-white rounded-xl p-3 shadow-sm border border-slate-100 text-center">
-          <p className="text-xl font-bold text-slate-900">{mockStaff.length}</p>
+          <p className="text-xl font-bold text-slate-900">{allStaff.length}</p>
           <p className="text-[10px] text-slate-400 font-medium">Total</p>
         </div>
       </div>
@@ -65,9 +86,10 @@ export default function StaffList() {
         Active Staff
       </p>
       <div className="space-y-2 mb-5">
-        {activeStaff.map((staff) => {
-          const rc = roleConfig[staff.role]
+        {activeStaff.map((staff: any) => {
+          const rc = roleConfig[staff.role as StaffRole] || roleConfig.warden
           const RoleIcon = rc.icon
+          const initials = getInitials(staff.name)
           return (
             <Link
               key={staff.id}
@@ -75,7 +97,7 @@ export default function StaffList() {
               className="flex items-center gap-3 bg-white rounded-xl p-3.5 border border-slate-100 shadow-sm hover:shadow-md active:bg-slate-50 transition-all"
             >
               <div className={`w-11 h-11 rounded-full ${rc.bg} flex items-center justify-center shrink-0`}>
-                <span className={`text-sm font-bold ${rc.color}`}>{staff.initials}</span>
+                <span className={`text-sm font-bold ${rc.color}`}>{initials}</span>
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
@@ -105,8 +127,9 @@ export default function StaffList() {
             Inactive
           </p>
           <div className="space-y-2">
-            {inactiveStaff.map((staff) => {
-              const rc = roleConfig[staff.role]
+            {inactiveStaff.map((staff: any) => {
+              const rc = roleConfig[staff.role as StaffRole] || roleConfig.warden
+              const initials = getInitials(staff.name)
               return (
                 <Link
                   key={staff.id}
@@ -114,7 +137,7 @@ export default function StaffList() {
                   className="flex items-center gap-3 bg-white rounded-xl p-3.5 border border-slate-100 shadow-sm opacity-60 hover:opacity-80 active:bg-slate-50 transition-all"
                 >
                   <div className="w-11 h-11 rounded-full bg-slate-100 flex items-center justify-center shrink-0">
-                    <span className="text-sm font-bold text-slate-400">{staff.initials}</span>
+                    <span className="text-sm font-bold text-slate-400">{initials}</span>
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-slate-500 truncate">{staff.name}</p>

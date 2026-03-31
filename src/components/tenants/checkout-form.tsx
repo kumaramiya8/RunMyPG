@@ -15,12 +15,17 @@ import {
   ArrowLeft,
 } from 'lucide-react'
 import Link from 'next/link'
-import {
-  mockTenants,
-  mockOccupancies,
-  mockBeds,
-  mockRooms,
-} from '@/lib/mock-data'
+import { useRouter } from 'next/navigation'
+import { useAuth } from '@/lib/auth-context'
+import { useQuery } from '@/lib/hooks/use-query'
+import { getActiveOccupancies, checkOut } from '@/lib/services/tenants'
+import { ListSkeleton, EmptyState } from '@/components/loading-skeleton'
+import type { Occupancy, Tenant, Bed, Room } from '@/lib/types'
+
+interface OccupancyWithJoins extends Occupancy {
+  tenant: Tenant
+  bed: Bed & { room: Room }
+}
 
 interface Deduction {
   id: string
@@ -29,20 +34,35 @@ interface Deduction {
 }
 
 export default function CheckoutForm() {
+  const { orgId } = useAuth()
+  const router = useRouter()
   const [search, setSearch] = useState('')
   const [selectedTenant, setSelectedTenant] = useState<string | null>(null)
   const [deductions, setDeductions] = useState<Deduction[]>([])
   const [newDeductionLabel, setNewDeductionLabel] = useState('')
   const [newDeductionAmount, setNewDeductionAmount] = useState('')
   const [confirmed, setConfirmed] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  // Build active tenants
-  const activeTenants = mockTenants.map((tenant) => {
-    const occupancy = mockOccupancies.find((o) => o.tenant_id === tenant.id && o.status !== 'checked_out')
-    const bed = occupancy ? mockBeds.find((b) => b.id === occupancy.bed_id) : undefined
-    const room = bed ? mockRooms.find((r) => r.id === bed.room_id) : undefined
-    return { tenant, occupancy, bed, room }
-  }).filter((t) => t.occupancy)
+  const { data: occupancies, loading } = useQuery(
+    () => getActiveOccupancies(orgId!),
+    [orgId]
+  )
+
+  if (loading) {
+    return <ListSkeleton rows={5} />
+  }
+
+  const activeOccupancies = (occupancies ?? []) as OccupancyWithJoins[]
+
+  // Build active tenants from occupancies with joined data
+  const activeTenants = activeOccupancies.map((occ) => ({
+    tenant: occ.tenant,
+    occupancy: occ,
+    bed: occ.bed,
+    room: occ.bed?.room,
+  }))
 
   const filtered = search
     ? activeTenants.filter(({ tenant, room }) =>
@@ -71,6 +91,20 @@ export default function CheckoutForm() {
 
   const removeDeduction = (id: string) => {
     setDeductions(deductions.filter((d) => d.id !== id))
+  }
+
+  const handleCheckout = async () => {
+    if (!selected?.occupancy) return
+    setSubmitting(true)
+    setError(null)
+    try {
+      await checkOut(selected.occupancy.id, selected.occupancy.bed_id, totalDeductions)
+      setConfirmed(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Check-out failed. Please try again.')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   if (confirmed && selected) {
@@ -117,6 +151,12 @@ export default function CheckoutForm() {
 
   return (
     <div>
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-3 mb-4">
+          <p className="text-xs font-medium text-red-700">{error}</p>
+        </div>
+      )}
+
       {!selectedTenant ? (
         <>
           {/* Search & Select Tenant */}
@@ -131,27 +171,35 @@ export default function CheckoutForm() {
             />
           </div>
 
-          <div className="space-y-2">
-            {filtered.map(({ tenant, occupancy, room, bed }) => (
-              <button
-                key={tenant.id}
-                onClick={() => setSelectedTenant(tenant.id)}
-                className="w-full flex items-center gap-3 bg-white rounded-xl p-3 border border-slate-100 shadow-sm hover:shadow-md active:bg-slate-50 transition-all text-left"
-              >
-                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                  <span className="text-sm font-bold text-primary">
-                    {tenant.full_name.split(' ').map((n) => n[0]).join('')}
-                  </span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-slate-900">{tenant.full_name}</p>
-                  <p className="text-[11px] text-slate-500">
-                    {room?.name} - {bed?.bed_number} &middot; Since {new Date(occupancy!.checkin_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
-                  </p>
-                </div>
-              </button>
-            ))}
-          </div>
+          {activeTenants.length === 0 ? (
+            <EmptyState
+              icon={User}
+              title="No active tenants"
+              description="There are no tenants to check out."
+            />
+          ) : (
+            <div className="space-y-2">
+              {filtered.map(({ tenant, occupancy, room, bed }) => (
+                <button
+                  key={tenant.id}
+                  onClick={() => setSelectedTenant(tenant.id)}
+                  className="w-full flex items-center gap-3 bg-white rounded-xl p-3 border border-slate-100 shadow-sm hover:shadow-md active:bg-slate-50 transition-all text-left"
+                >
+                  <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                    <span className="text-sm font-bold text-primary">
+                      {tenant.full_name.split(' ').map((n) => n[0]).join('')}
+                    </span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-slate-900">{tenant.full_name}</p>
+                    <p className="text-[11px] text-slate-500">
+                      {room?.name} - {bed?.bed_number} &middot; Since {new Date(occupancy!.checkin_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                    </p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
         </>
       ) : selected ? (
         <>
@@ -279,11 +327,18 @@ export default function CheckoutForm() {
           </div>
 
           <button
-            onClick={() => setConfirmed(true)}
-            className="w-full py-3 bg-red-600 text-white font-semibold rounded-xl text-sm hover:bg-red-700 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+            onClick={handleCheckout}
+            disabled={submitting}
+            className="w-full py-3 bg-red-600 text-white font-semibold rounded-xl text-sm hover:bg-red-700 active:scale-[0.98] transition-all flex items-center justify-center gap-2 disabled:opacity-60"
           >
-            <Check className="w-4 h-4" />
-            Confirm Check-Out
+            {submitting ? (
+              <span>Processing...</span>
+            ) : (
+              <>
+                <Check className="w-4 h-4" />
+                Confirm Check-Out
+              </>
+            )}
           </button>
         </>
       ) : null}

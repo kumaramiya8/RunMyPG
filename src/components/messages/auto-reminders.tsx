@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   Bell,
   Clock,
@@ -13,6 +13,10 @@ import {
   ToggleLeft,
   ToggleRight,
 } from 'lucide-react'
+import { useAuth } from '@/lib/auth-context'
+import { useQuery, useMutation } from '@/lib/hooks/use-query'
+import { supabase } from '@/lib/supabase'
+import { ListSkeleton } from '@/components/loading-skeleton'
 
 interface ReminderRule {
   id: string
@@ -23,48 +27,49 @@ interface ReminderRule {
   daysBefore: number
   message: string
   type: 'pre_due' | 'on_due' | 'overdue'
+  settingKey: string
 }
 
-const defaultRules: ReminderRule[] = [
+const defaultRules: Omit<ReminderRule, 'enabled'>[] = [
   {
     id: 'r1',
     name: '3 Days Before Due',
     description: 'Polite reminder sent 3 days before rent is due',
     icon: Clock,
-    enabled: true,
     daysBefore: 3,
     message: 'Hi {NAME}, your rent of {AMOUNT} for {MONTH} is due on {DUE_DATE}. Please arrange payment at your convenience. Thank you!',
     type: 'pre_due',
+    settingKey: 'auto_rent_reminder_3d_before',
   },
   {
     id: 'r2',
     name: 'On Due Date',
     description: 'Reminder sent on the actual due date',
     icon: IndianRupee,
-    enabled: true,
     daysBefore: 0,
     message: 'Hi {NAME}, your rent of {AMOUNT} is due today ({DUE_DATE}). Please make the payment to avoid any late charges. Thank you!',
     type: 'on_due',
+    settingKey: 'auto_rent_reminder_on_due',
   },
   {
     id: 'r3',
     name: '3 Days Overdue',
     description: 'Firmer reminder when payment is 3 days late',
     icon: AlertTriangle,
-    enabled: true,
     daysBefore: -3,
     message: 'Hi {NAME}, your rent of {AMOUNT} was due on {DUE_DATE} and is now 3 days overdue. Please clear the payment immediately to avoid additional charges.',
     type: 'overdue',
+    settingKey: 'auto_rent_reminder_3d_overdue',
   },
   {
     id: 'r4',
     name: '7 Days Overdue',
     description: 'Final warning when payment is a week late',
     icon: AlertTriangle,
-    enabled: false,
     daysBefore: -7,
     message: 'Hi {NAME}, this is a final reminder. Your rent of {AMOUNT} is now 7 days overdue. Please settle the payment today or contact us to discuss.',
     type: 'overdue',
+    settingKey: 'auto_rent_reminder_7d_overdue',
   },
 ]
 
@@ -74,14 +79,46 @@ const typeColors: Record<string, { bg: string; color: string; border: string }> 
   overdue: { bg: 'bg-red-50', color: 'text-red-600', border: 'border-red-200' },
 }
 
+async function getOrgSettings(orgId: string) {
+  const { data, error } = await supabase
+    .from('organizations')
+    .select('auto_rent_reminder_3d_before, auto_rent_reminder_on_due, auto_rent_reminder_3d_overdue, auto_rent_reminder_7d_overdue')
+    .eq('id', orgId)
+    .single()
+  if (error) throw error
+  return data
+}
+
+async function updateOrgSetting(orgId: string, key: string, value: boolean) {
+  const { error } = await supabase
+    .from('organizations')
+    .update({ [key]: value })
+    .eq('id', orgId)
+  if (error) throw error
+}
+
 export default function AutoReminders() {
-  const [rules, setRules] = useState(defaultRules)
+  const { orgId } = useAuth()
+  const { data: orgSettings, loading, error, refetch } = useQuery(
+    () => getOrgSettings(orgId!),
+    [orgId]
+  )
+
+  const updateSettingMut = useMutation(updateOrgSetting)
   const [editingId, setEditingId] = useState<string | null>(null)
 
-  const toggleRule = (id: string) => {
-    setRules((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, enabled: !r.enabled } : r))
-    )
+  if (!orgId) return null
+  if (loading) return <ListSkeleton rows={4} />
+
+  // Build rules from org settings (fallback to defaults if columns don't exist yet)
+  const rules: ReminderRule[] = defaultRules.map((r) => ({
+    ...r,
+    enabled: orgSettings ? (orgSettings as any)[r.settingKey] ?? (r.id === 'r1' || r.id === 'r2' || r.id === 'r3') : (r.id === 'r1' || r.id === 'r2' || r.id === 'r3'),
+  }))
+
+  const toggleRule = async (rule: ReminderRule) => {
+    await updateSettingMut.mutate(orgId, rule.settingKey, !rule.enabled)
+    refetch()
   }
 
   const activeCount = rules.filter((r) => r.enabled).length
@@ -113,6 +150,13 @@ export default function AutoReminders() {
         </p>
       </div>
 
+      {/* Error display */}
+      {(error || updateSettingMut.error) && (
+        <div className="bg-red-50 text-red-600 text-xs rounded-xl p-3 border border-red-100">
+          {error || updateSettingMut.error}
+        </div>
+      )}
+
       {/* Reminder rules */}
       <div className="space-y-3">
         {rules.map((rule) => {
@@ -137,7 +181,8 @@ export default function AutoReminders() {
                   <p className="text-[11px] text-slate-400">{rule.description}</p>
                 </div>
                 <button
-                  onClick={() => toggleRule(rule.id)}
+                  onClick={() => toggleRule(rule)}
+                  disabled={updateSettingMut.loading}
                   className="shrink-0"
                 >
                   {rule.enabled ? (

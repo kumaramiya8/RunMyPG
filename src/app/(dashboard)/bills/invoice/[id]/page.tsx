@@ -1,10 +1,11 @@
-import InvoiceDetailClient from './client'
-import { mockInvoices } from '@/lib/mock-data'
+'use client'
 
-export function generateStaticParams() {
-  return mockInvoices.map((inv) => ({ id: inv.id }))
-}
+import { useParams } from 'next/navigation'
+import InvoiceDetail from '@/components/bills/invoice-detail'
 
-export default function InvoiceDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  return <InvoiceDetailClient params={params} />
+export default function InvoiceDetailPage() {
+  const params = useParams()
+  const id = params.id as string
+
+  return <InvoiceDetail invoiceId={id} />
 }

@@ -4,7 +4,6 @@ import { useState } from 'react'
 import Link from 'next/link'
 import {
   Search,
-  Plus,
   Zap,
   Droplets,
   Sofa,
@@ -14,9 +13,11 @@ import {
   Clock,
   CheckCircle,
   Loader2,
-  Filter,
 } from 'lucide-react'
-import { mockComplaints, mockTenants, mockRooms } from '@/lib/mock-data'
+import { useAuth } from '@/lib/auth-context'
+import { useQuery } from '@/lib/hooks/use-query'
+import { getComplaints } from '@/lib/services/complaints'
+import { ListSkeleton, CardSkeleton } from '@/components/loading-skeleton'
 import type { ComplaintStatus } from '@/lib/types'
 
 const categoryIcons: Record<string, typeof Zap> = {
@@ -62,28 +63,43 @@ function timeAgo(dateStr: string): string {
 }
 
 export default function ComplaintList() {
+  const { orgId } = useAuth()
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
 
-  const enriched = mockComplaints.map((c) => ({
-    complaint: c,
-    tenant: c.tenant_id ? mockTenants.find((t) => t.id === c.tenant_id) : undefined,
-    room: c.room_id ? mockRooms.find((r) => r.id === c.room_id) : undefined,
-  }))
+  const { data: complaints, loading } = useQuery(
+    () => getComplaints(orgId!),
+    [orgId]
+  )
 
-  const filtered = enriched.filter(({ complaint, tenant, room }) => {
+  if (!orgId || loading) {
+    return (
+      <div>
+        <div className="grid grid-cols-3 gap-2 mb-4">
+          <CardSkeleton /><CardSkeleton /><CardSkeleton />
+        </div>
+        <ListSkeleton rows={5} />
+      </div>
+    )
+  }
+
+  const allComplaints = complaints || []
+
+  const filtered = allComplaints.filter((complaint: any) => {
+    const tenantName = complaint.tenant?.full_name || ''
+    const roomName = complaint.room?.name || ''
     const matchesStatus = statusFilter === 'all' || complaint.status === statusFilter
     const matchesSearch = !search ||
-      complaint.description.toLowerCase().includes(search.toLowerCase()) ||
-      tenant?.full_name.toLowerCase().includes(search.toLowerCase()) ||
-      room?.name.toLowerCase().includes(search.toLowerCase()) ||
-      complaint.category.toLowerCase().includes(search.toLowerCase())
+      complaint.description?.toLowerCase().includes(search.toLowerCase()) ||
+      tenantName.toLowerCase().includes(search.toLowerCase()) ||
+      roomName.toLowerCase().includes(search.toLowerCase()) ||
+      complaint.category?.toLowerCase().includes(search.toLowerCase())
     return matchesStatus && matchesSearch
   })
 
-  const openCount = mockComplaints.filter((c) => c.status === 'open').length
-  const inProgressCount = mockComplaints.filter((c) => c.status === 'in_progress').length
-  const resolvedCount = mockComplaints.filter((c) => c.status === 'resolved' || c.status === 'closed').length
+  const openCount = allComplaints.filter((c: any) => c.status === 'open').length
+  const inProgressCount = allComplaints.filter((c: any) => c.status === 'in_progress').length
+  const resolvedCount = allComplaints.filter((c: any) => c.status === 'resolved' || c.status === 'closed').length
 
   return (
     <div>
@@ -118,7 +134,7 @@ export default function ComplaintList() {
       {/* Status filter */}
       <div className="flex gap-2 mb-4 overflow-x-auto pb-1 scroll-touch -mx-4 px-4 md:mx-0 md:px-0">
         {[
-          { key: 'all' as const, label: 'All', count: mockComplaints.length },
+          { key: 'all' as const, label: 'All', count: allComplaints.length },
           { key: 'open' as const, label: 'Open', count: openCount },
           { key: 'in_progress' as const, label: 'In Progress', count: inProgressCount },
           { key: 'resolved' as const, label: 'Resolved', count: resolvedCount },
@@ -139,10 +155,12 @@ export default function ComplaintList() {
 
       {/* Complaint cards */}
       <div className="space-y-2">
-        {filtered.map(({ complaint, tenant, room }) => {
+        {filtered.map((complaint: any) => {
+          const tenantName = complaint.tenant?.full_name || ''
+          const roomName = complaint.room?.name || ''
           const Icon = categoryIcons[complaint.category] || AlertTriangle
           const catColor = categoryColors[complaint.category] || 'bg-slate-50 text-slate-500'
-          const stCfg = statusConfig[complaint.status]
+          const stCfg = statusConfig[complaint.status as ComplaintStatus]
           const StatusIcon = stCfg.icon
           const priCfg = priorityConfig[complaint.priority] || priorityConfig.medium
 
@@ -162,12 +180,12 @@ export default function ComplaintList() {
                   </p>
                   <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
                     <span className="text-[11px] text-slate-500 font-medium">
-                      {room?.name || 'Unknown'}
+                      {roomName || 'Unknown'}
                     </span>
-                    {tenant && (
+                    {tenantName && (
                       <>
                         <span className="text-slate-300">&middot;</span>
-                        <span className="text-[11px] text-slate-500">{tenant.full_name}</span>
+                        <span className="text-[11px] text-slate-500">{tenantName}</span>
                       </>
                     )}
                   </div>

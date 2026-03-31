@@ -8,15 +8,21 @@ interface AuthState {
   user: User | null
   session: Session | null
   orgId: string | null
+  orgName: string | null
+  accountSlug: string | null
+  accountType: string | null // 'master' or 'pg'
   staffRole: string | null
+  staffName: string | null
   loading: boolean
 }
 
 interface AuthContextValue extends AuthState {
-  signIn: (email: string, password: string) => Promise<{ error: string | null }>
-  signUp: (email: string, password: string, orgName: string, ownerName: string) => Promise<{ error: string | null }>
+  isMaster: boolean
+  signIn: (accountSlug: string, email: string, password: string) => Promise<{ error: string | null }>
   signOut: () => Promise<void>
 }
+
+const STORAGE_KEY = 'runmypg_account_slug'
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
@@ -25,85 +31,138 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     user: null,
     session: null,
     orgId: null,
+    orgName: null,
+    accountSlug: null,
+    accountType: null,
     staffRole: null,
+    staffName: null,
     loading: true,
   })
 
-  const fetchStaffInfo = useCallback(async (userId: string) => {
-    const { data } = await supabase
+  const fetchOrgAndStaff = useCallback(async (userId: string, slug?: string) => {
+    // Get the slug from storage if not provided
+    const accountSlug = slug || (typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null)
+    if (!accountSlug) {
+      setState((prev) => ({ ...prev, loading: false }))
+      return
+    }
+
+    // Find the org by slug
+    const { data: org } = await supabase
+      .from('organizations')
+      .select('id, name, account_slug, account_type')
+      .eq('account_slug', accountSlug)
+      .single()
+
+    if (!org) {
+      setState((prev) => ({ ...prev, loading: false }))
+      return
+    }
+
+    // Find the staff record for this user in this org
+    const { data: staff } = await supabase
       .from('staff_members')
-      .select('org_id, role')
+      .select('role, name')
       .eq('user_id', userId)
+      .eq('org_id', org.id)
       .eq('is_active', true)
       .single()
 
-    if (data) {
-      setState((prev) => ({ ...prev, orgId: data.org_id, staffRole: data.role }))
-    }
+    setState((prev) => ({
+      ...prev,
+      orgId: org.id,
+      orgName: org.name,
+      accountSlug: org.account_slug,
+      accountType: org.account_type,
+      staffRole: staff?.role ?? null,
+      staffName: staff?.name ?? null,
+    }))
   }, [])
 
   useEffect(() => {
-    // Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setState((prev) => ({
         ...prev,
         user: session?.user ?? null,
         session,
-        loading: false,
+        loading: session?.user ? true : false, // keep loading if we need to fetch org
       }))
       if (session?.user) {
-        fetchStaffInfo(session.user.id)
+        fetchOrgAndStaff(session.user.id).then(() => {
+          setState((prev) => ({ ...prev, loading: false }))
+        })
       }
     })
 
-    // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setState((prev) => ({
         ...prev,
         user: session?.user ?? null,
         session,
-        loading: false,
       }))
       if (session?.user) {
-        fetchStaffInfo(session.user.id)
+        fetchOrgAndStaff(session.user.id)
       } else {
-        setState((prev) => ({ ...prev, orgId: null, staffRole: null }))
+        setState((prev) => ({
+          ...prev,
+          orgId: null, orgName: null, accountSlug: null, accountType: null,
+          staffRole: null, staffName: null, loading: false,
+        }))
       }
     })
 
     return () => subscription.unsubscribe()
-  }, [fetchStaffInfo])
+  }, [fetchOrgAndStaff])
 
-  const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-    return { error: error?.message ?? null }
-  }
+  const signIn = async (accountSlug: string, email: string, password: string) => {
+    // 1. Verify the account slug exists
+    const { data: org } = await supabase
+      .from('organizations')
+      .select('id, account_type')
+      .eq('account_slug', accountSlug.toLowerCase().trim())
+      .single()
 
-  const signUp = async (email: string, password: string, orgName: string, ownerName: string) => {
-    // 1. Create auth user
-    const { data: authData, error: authError } = await supabase.auth.signUp({ email, password })
+    if (!org) return { error: 'Account not found. Check the account name.' }
+
+    // 2. Sign in with Supabase Auth
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({ email, password })
     if (authError) return { error: authError.message }
-    if (!authData.user) return { error: 'Failed to create account' }
+    if (!authData.user) return { error: 'Login failed' }
 
-    // 2. Create org + owner via SECURITY DEFINER function (bypasses RLS)
-    const { error: rpcError } = await supabase.rpc('create_org_and_owner', {
-      p_org_name: orgName,
-      p_owner_name: ownerName,
-      p_user_id: authData.user.id,
-    })
+    // 3. Verify user belongs to this org
+    const { data: staff } = await supabase
+      .from('staff_members')
+      .select('id')
+      .eq('user_id', authData.user.id)
+      .eq('org_id', org.id)
+      .eq('is_active', true)
+      .single()
 
-    if (rpcError) return { error: rpcError.message }
+    if (!staff) {
+      await supabase.auth.signOut()
+      return { error: 'You do not have access to this account.' }
+    }
+
+    // 4. Store slug and fetch org info
+    localStorage.setItem(STORAGE_KEY, accountSlug.toLowerCase().trim())
+    await fetchOrgAndStaff(authData.user.id, accountSlug.toLowerCase().trim())
 
     return { error: null }
   }
 
   const signOut = async () => {
+    localStorage.removeItem(STORAGE_KEY)
     await supabase.auth.signOut()
-    setState({ user: null, session: null, orgId: null, staffRole: null, loading: false })
+    setState({
+      user: null, session: null, orgId: null, orgName: null,
+      accountSlug: null, accountType: null, staffRole: null, staffName: null, loading: false,
+    })
   }
 
+  const isMaster = state.accountType === 'master'
+
   return (
-    <AuthContext.Provider value={{ ...state, signIn, signUp, signOut }}>
+    <AuthContext.Provider value={{ ...state, isMaster, signIn, signOut }}>
       {children}
     </AuthContext.Provider>
   )

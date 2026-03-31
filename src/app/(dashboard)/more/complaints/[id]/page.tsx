@@ -1,10 +1,11 @@
-import ComplaintDetailClient from './client'
-import { mockComplaints } from '@/lib/mock-data'
+'use client'
 
-export function generateStaticParams() {
-  return mockComplaints.map((c) => ({ id: c.id }))
-}
+import { useParams } from 'next/navigation'
+import ComplaintDetail from '@/components/complaints/complaint-detail'
 
-export default function ComplaintDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  return <ComplaintDetailClient params={params} />
+export default function ComplaintDetailPage() {
+  const params = useParams()
+  const id = params.id as string
+
+  return <ComplaintDetail complaintId={id} />
 }

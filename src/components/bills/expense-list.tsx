@@ -12,9 +12,11 @@ import {
   SprayCan,
   UserCog,
   HelpCircle,
-  Receipt,
 } from 'lucide-react'
-import { mockExpenses } from '@/lib/mock-data'
+import { useAuth } from '@/lib/auth-context'
+import { useQuery } from '@/lib/hooks/use-query'
+import { getExpenses } from '@/lib/services/billing'
+import { ListSkeleton, CardSkeleton } from '@/components/loading-skeleton'
 
 function formatINR(amount: number): string {
   return new Intl.NumberFormat('en-IN', {
@@ -47,20 +49,37 @@ const categoryColors: Record<string, string> = {
 type FilterCat = 'all' | string
 
 export default function ExpenseList() {
+  const { orgId } = useAuth()
   const [filter, setFilter] = useState<FilterCat>('all')
 
+  const { data: expenses, loading } = useQuery(
+    () => getExpenses(orgId!),
+    [orgId]
+  )
+
+  if (!orgId || loading) {
+    return (
+      <div>
+        <CardSkeleton />
+        <div className="mt-4"><ListSkeleton rows={5} /></div>
+      </div>
+    )
+  }
+
+  const allExpenses = expenses || []
+
   // Get unique categories
-  const categories = [...new Set(mockExpenses.map((e) => e.category))]
+  const categories = [...new Set(allExpenses.map((e: any) => e.category))]
 
   const filtered = filter === 'all'
-    ? mockExpenses
-    : mockExpenses.filter((e) => e.category === filter)
+    ? allExpenses
+    : allExpenses.filter((e: any) => e.category === filter)
 
-  const totalAmount = filtered.reduce((s, e) => s + e.amount, 0)
+  const totalAmount = filtered.reduce((s: number, e: any) => s + Number(e.amount), 0)
 
   // Group by date
-  const grouped: Record<string, typeof mockExpenses> = {}
-  filtered.forEach((exp) => {
+  const grouped: Record<string, any[]> = {}
+  filtered.forEach((exp: any) => {
     const date = exp.expense_date
     if (!grouped[date]) grouped[date] = []
     grouped[date].push(exp)
@@ -97,8 +116,8 @@ export default function ExpenseList() {
         >
           All
         </button>
-        {categories.map((cat) => {
-          const count = mockExpenses.filter((e) => e.category === cat).length
+        {categories.map((cat: string) => {
+          const count = allExpenses.filter((e: any) => e.category === cat).length
           return (
             <button
               key={cat}
@@ -116,8 +135,8 @@ export default function ExpenseList() {
       {/* Expense list grouped by date */}
       <div className="space-y-4">
         {sortedDates.map((date) => {
-          const expenses = grouped[date]
-          const dayTotal = expenses.reduce((s, e) => s + e.amount, 0)
+          const dayExpenses = grouped[date]
+          const dayTotal = dayExpenses.reduce((s: number, e: any) => s + Number(e.amount), 0)
           const formattedDate = new Date(date).toLocaleDateString('en-IN', {
             weekday: 'short',
             day: 'numeric',
@@ -131,7 +150,7 @@ export default function ExpenseList() {
                 <span className="text-xs font-bold text-slate-600">{formatINR(dayTotal)}</span>
               </div>
               <div className="bg-white rounded-2xl shadow-sm border border-slate-100 divide-y divide-slate-50">
-                {expenses.map((expense) => {
+                {dayExpenses.map((expense: any) => {
                   const Icon = categoryIcons[expense.category] || HelpCircle
                   const color = categoryColors[expense.category] || 'bg-slate-50 text-slate-500'
                   return (

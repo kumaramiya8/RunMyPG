@@ -1,62 +1,20 @@
 'use client'
 
-import { AlertTriangle, Zap, Droplets, Sofa, SprayCan } from 'lucide-react'
-
-interface ComplaintItem {
-  id: string
-  room: string
-  category: string
-  description: string
-  priority: 'low' | 'medium' | 'high' | 'urgent'
-  status: 'open' | 'in_progress' | 'resolved'
-  timeAgo: string
-}
-
-// Demo data — will be replaced with Supabase queries
-const demoComplaints: ComplaintItem[] = [
-  {
-    id: '1',
-    room: 'Room 204',
-    category: 'Electrical',
-    description: 'Ceiling fan making grinding noise',
-    priority: 'high',
-    status: 'open',
-    timeAgo: '2h ago',
-  },
-  {
-    id: '2',
-    room: 'Room 108',
-    category: 'Plumbing',
-    description: 'Bathroom tap leaking continuously',
-    priority: 'medium',
-    status: 'in_progress',
-    timeAgo: '5h ago',
-  },
-  {
-    id: '3',
-    room: 'Room 312',
-    category: 'Furniture',
-    description: 'Bed frame is broken, needs replacement',
-    priority: 'urgent',
-    status: 'open',
-    timeAgo: '1d ago',
-  },
-  {
-    id: '4',
-    room: 'Room 105',
-    category: 'Cleaning',
-    description: 'Common bathroom needs deep cleaning',
-    priority: 'low',
-    status: 'open',
-    timeAgo: '1d ago',
-  },
-]
+import { AlertTriangle, Zap, Droplets, Sofa, SprayCan, Wrench } from 'lucide-react'
+import { useAuth } from '@/lib/auth-context'
+import { useQuery } from '@/lib/hooks/use-query'
+import { getComplaints } from '@/lib/services/complaints'
+import { ListSkeleton, EmptyState } from '@/components/loading-skeleton'
 
 const categoryIcons: Record<string, typeof Zap> = {
   Electrical: Zap,
+  electrical: Zap,
   Plumbing: Droplets,
+  plumbing: Droplets,
   Furniture: Sofa,
+  furniture: Sofa,
   Cleaning: SprayCan,
+  cleaning: SprayCan,
 }
 
 const priorityStyles: Record<string, string> = {
@@ -78,7 +36,56 @@ const statusLabels: Record<string, string> = {
   resolved: 'Resolved',
 }
 
+function timeAgo(dateStr: string): string {
+  const date = new Date(dateStr)
+  const now = new Date()
+  const diffMs = now.getTime() - date.getTime()
+  const diffMins = Math.floor(diffMs / (1000 * 60))
+  if (diffMins < 60) return `${diffMins}m ago`
+  const diffHours = Math.floor(diffMins / 60)
+  if (diffHours < 24) return `${diffHours}h ago`
+  const diffDays = Math.floor(diffHours / 24)
+  return `${diffDays}d ago`
+}
+
 export default function RecentComplaints() {
+  const { orgId } = useAuth()
+
+  const { data: complaints, loading } = useQuery(
+    () => (orgId ? getComplaints(orgId) : Promise.resolve(null)),
+    [orgId]
+  )
+
+  if (loading) {
+    return (
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4">
+        <ListSkeleton rows={3} />
+      </div>
+    )
+  }
+
+  // Show only non-resolved complaints, up to 4
+  const activeComplaints = (complaints || [])
+    .filter((c) => c.status !== 'resolved')
+    .slice(0, 4)
+
+  if (activeComplaints.length === 0) {
+    return (
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100">
+        <div className="flex items-center justify-between p-4 pb-2">
+          <h3 className="text-sm font-semibold text-slate-900">Maintenance Issues</h3>
+        </div>
+        <div className="p-4">
+          <EmptyState
+            icon={Wrench}
+            title="No open issues"
+            description="All maintenance issues have been resolved."
+          />
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-slate-100">
       <div className="flex items-center justify-between p-4 pb-2">
@@ -89,8 +96,9 @@ export default function RecentComplaints() {
       </div>
 
       <div className="divide-y divide-slate-50">
-        {demoComplaints.map((complaint) => {
+        {activeComplaints.map((complaint) => {
           const Icon = categoryIcons[complaint.category] || AlertTriangle
+          const roomName = complaint.room?.name || 'Unknown'
 
           return (
             <div key={complaint.id} className="px-4 py-3 hover:bg-slate-50/50 transition-colors active:bg-slate-100 cursor-pointer">
@@ -106,19 +114,19 @@ export default function RecentComplaints() {
                   </div>
                   <div className="flex items-center gap-2 mt-1.5">
                     <span className="text-[11px] font-medium text-slate-500">
-                      {complaint.room}
+                      {roomName}
                     </span>
                     <span className="text-slate-300">&#183;</span>
-                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${priorityStyles[complaint.priority]}`}>
-                      {complaint.priority.toUpperCase()}
+                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${priorityStyles[complaint.priority] || 'bg-slate-100 text-slate-600'}`}>
+                      {(complaint.priority || 'low').toUpperCase()}
                     </span>
-                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${statusStyles[complaint.status]}`}>
-                      {statusLabels[complaint.status]}
+                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${statusStyles[complaint.status] || 'bg-slate-100 text-slate-600'}`}>
+                      {statusLabels[complaint.status] || complaint.status}
                     </span>
                   </div>
                 </div>
                 <span className="text-[10px] text-slate-400 whitespace-nowrap shrink-0 mt-1">
-                  {complaint.timeAgo}
+                  {timeAgo(complaint.created_at)}
                 </span>
               </div>
             </div>

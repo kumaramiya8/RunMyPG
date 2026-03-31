@@ -10,27 +10,54 @@ import {
   CheckCircle,
   AlertTriangle,
   Building2,
+  Users,
 } from 'lucide-react'
-import {
-  mockTenants,
-  mockOccupancies,
-  mockBeds,
-  mockRooms,
-} from '@/lib/mock-data'
+import { useAuth } from '@/lib/auth-context'
+import { useQuery } from '@/lib/hooks/use-query'
+import { getActiveOccupancies } from '@/lib/services/tenants'
+import { ListSkeleton, EmptyState } from '@/components/loading-skeleton'
+import type { Occupancy, Tenant, Bed, Room } from '@/lib/types'
 
 type FilterType = 'all' | 'active' | 'notice'
 
+interface OccupancyWithJoins extends Occupancy {
+  tenant: Tenant
+  bed: Bed & { room: Room }
+}
+
 export default function TenantList() {
+  const { orgId } = useAuth()
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<FilterType>('all')
 
-  // Build enriched tenant data
-  const enrichedTenants = mockTenants.map((tenant) => {
-    const occupancy = mockOccupancies.find((o) => o.tenant_id === tenant.id && o.status !== 'checked_out')
-    const bed = occupancy ? mockBeds.find((b) => b.id === occupancy.bed_id) : undefined
-    const room = bed ? mockRooms.find((r) => r.id === bed.room_id) : undefined
-    return { tenant, occupancy, bed, room }
-  })
+  const { data: occupancies, loading } = useQuery(
+    () => getActiveOccupancies(orgId!),
+    [orgId]
+  )
+
+  if (loading) {
+    return <ListSkeleton rows={5} />
+  }
+
+  const activeOccupancies = (occupancies ?? []) as OccupancyWithJoins[]
+
+  if (activeOccupancies.length === 0) {
+    return (
+      <EmptyState
+        icon={Users}
+        title="No tenants yet"
+        description="Check in your first tenant to get started."
+      />
+    )
+  }
+
+  // Build enriched tenant data from occupancies with joined data
+  const enrichedTenants = activeOccupancies.map((occ) => ({
+    tenant: occ.tenant,
+    occupancy: occ,
+    bed: occ.bed,
+    room: occ.bed?.room,
+  }))
 
   const filtered = enrichedTenants.filter(({ tenant, occupancy }) => {
     const matchesSearch = tenant.full_name.toLowerCase().includes(search.toLowerCase()) ||

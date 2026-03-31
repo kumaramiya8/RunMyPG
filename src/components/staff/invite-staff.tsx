@@ -19,6 +19,9 @@ import {
   FileBarChart,
 } from 'lucide-react'
 import type { StaffRole } from '@/lib/types'
+import { useAuth } from '@/lib/auth-context'
+import { useMutation } from '@/lib/hooks/use-query'
+import { inviteStaff } from '@/lib/services/staff'
 
 const roles: { key: StaffRole; label: string; desc: string; icon: typeof Crown; color: string }[] = [
   { key: 'manager', label: 'Manager', desc: 'Full access except owner settings', icon: ShieldCheck, color: 'bg-indigo-50 text-indigo-600' },
@@ -45,11 +48,14 @@ const roleDefaults: Record<StaffRole, Record<string, boolean>> = {
 }
 
 export default function InviteStaff() {
+  const { orgId } = useAuth()
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
   const [role, setRole] = useState<StaffRole | ''>('')
   const [perms, setPerms] = useState<Record<string, boolean>>({})
   const [saved, setSaved] = useState(false)
+
+  const inviteMut = useMutation(inviteStaff)
 
   const selectRole = (r: StaffRole) => {
     setRole(r)
@@ -58,6 +64,14 @@ export default function InviteStaff() {
 
   const togglePerm = (key: string) => {
     setPerms((prev) => ({ ...prev, [key]: !prev[key] }))
+  }
+
+  const handleSubmit = async () => {
+    if (!orgId || !name || !phone || !role) return
+    const result = await inviteMut.mutate(orgId, name, phone, role, perms)
+    if (result) {
+      setSaved(true)
+    }
   }
 
   if (saved) {
@@ -182,15 +196,22 @@ export default function InviteStaff() {
         </div>
       )}
 
+      {/* Error display */}
+      {inviteMut.error && (
+        <div className="bg-red-50 text-red-600 text-xs rounded-xl p-3 border border-red-100">
+          {inviteMut.error}
+        </div>
+      )}
+
       {/* Submit */}
       {role && (
         <button
-          onClick={() => setSaved(true)}
-          disabled={!name || !phone}
+          onClick={handleSubmit}
+          disabled={!name || !phone || inviteMut.loading}
           className="w-full py-3.5 bg-primary text-white font-semibold rounded-xl text-sm hover:bg-primary-dark active:scale-[0.98] transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
           <UserPlus className="w-4 h-4" />
-          Send Invite via WhatsApp
+          {inviteMut.loading ? 'Sending...' : 'Send Invite via WhatsApp'}
         </button>
       )}
     </div>

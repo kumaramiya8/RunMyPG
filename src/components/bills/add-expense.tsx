@@ -2,10 +2,8 @@
 
 import { useState } from 'react'
 import {
-  IndianRupee,
   Calendar,
   FileText,
-  Tag,
   Check,
   Droplets,
   Zap,
@@ -17,6 +15,9 @@ import {
   HelpCircle,
 } from 'lucide-react'
 import Link from 'next/link'
+import { useAuth } from '@/lib/auth-context'
+import { useMutation } from '@/lib/hooks/use-query'
+import { createExpense } from '@/lib/services/billing'
 
 const categories = [
   { key: 'Water', label: 'Water', icon: Droplets, color: 'bg-blue-50 text-blue-600 border-blue-200' },
@@ -30,11 +31,25 @@ const categories = [
 ]
 
 export default function AddExpense() {
+  const { orgId } = useAuth()
   const [category, setCategory] = useState('')
   const [description, setDescription] = useState('')
   const [amount, setAmount] = useState('')
   const [date, setDate] = useState(new Date().toISOString().split('T')[0])
   const [saved, setSaved] = useState(false)
+
+  const { mutate: doCreateExpense, loading: saving, error } = useMutation(
+    (cat: string, desc: string, amt: number, expDate: string) =>
+      createExpense(orgId!, null, cat, desc, amt, expDate)
+  )
+
+  const handleSave = async () => {
+    if (!category || !amount || !description || !orgId) return
+    const result = await doCreateExpense(category, description, Number(amount), date)
+    if (result !== null) {
+      setSaved(true)
+    }
+  }
 
   if (saved) {
     return (
@@ -137,14 +152,18 @@ export default function AddExpense() {
         </div>
       </div>
 
+      {error && (
+        <p className="text-sm text-red-600 bg-red-50 rounded-lg p-2">{error}</p>
+      )}
+
       {/* Save */}
       <button
-        onClick={() => setSaved(true)}
-        disabled={!category || !amount || !description}
+        onClick={handleSave}
+        disabled={!category || !amount || !description || saving}
         className="w-full py-3.5 bg-primary text-white font-semibold rounded-xl text-sm hover:bg-primary-dark active:scale-[0.98] transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
       >
         <Check className="w-4 h-4" />
-        Save Expense
+        {saving ? 'Saving...' : 'Save Expense'}
       </button>
     </div>
   )

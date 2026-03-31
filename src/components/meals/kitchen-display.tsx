@@ -10,7 +10,10 @@ import {
   ChefHat,
   Clock,
 } from 'lucide-react'
-import { mockTenants, mockOccupancies } from '@/lib/mock-data'
+import { useAuth } from '@/lib/auth-context'
+import { useQuery } from '@/lib/hooks/use-query'
+import { getActiveOccupancies } from '@/lib/services/tenants'
+import { getMealOptouts } from '@/lib/services/meals'
 
 type MealType = 'breakfast' | 'lunch' | 'dinner'
 
@@ -27,22 +30,8 @@ function getCurrentMeal(): MealType {
   return 'dinner'
 }
 
-// Same mock opt-out generation as dashboard
-function generateOptOuts(dateStr: string): Record<MealType, Set<string>> {
-  const seed = dateStr.split('-').reduce((a, b) => a + parseInt(b), 0)
-  const result: Record<MealType, Set<string>> = { breakfast: new Set(), lunch: new Set(), dinner: new Set() }
-  const tenantIds = mockTenants.map((t) => t.id)
-
-  tenantIds.forEach((id, i) => {
-    const hash = (seed * (i + 1) * 7) % 100
-    if (hash < 15) result.breakfast.add(id)
-    if ((hash + 30) % 100 < 18) result.lunch.add(id)
-    if ((hash + 60) % 100 < 22) result.dinner.add(id)
-  })
-  return result
-}
-
 export default function KitchenDisplay() {
+  const { orgId } = useAuth()
   const [currentTime, setCurrentTime] = useState(new Date())
   const [activeMeal, setActiveMeal] = useState<MealType>(getCurrentMeal())
 
@@ -52,8 +41,34 @@ export default function KitchenDisplay() {
   }, [])
 
   const dateStr = currentTime.toISOString().split('T')[0]
-  const optOuts = generateOptOuts(dateStr)
-  const totalActive = mockOccupancies.filter((o) => o.status !== 'checked_out').length
+
+  const { data: occupancies } = useQuery(
+    () => getActiveOccupancies(orgId!),
+    [orgId]
+  )
+
+  const { data: optoutsData } = useQuery(
+    () => getMealOptouts(orgId!, dateStr),
+    [orgId, dateStr]
+  )
+
+  // Build opt-out sets from real data
+  const optOuts: Record<MealType, Set<string>> = { breakfast: new Set(), lunch: new Set(), dinner: new Set() }
+  if (optoutsData) {
+    for (const row of optoutsData) {
+      const mt = row.meal_type as MealType
+      if (optOuts[mt]) {
+        optOuts[mt].add(row.tenant_id)
+      }
+    }
+  }
+
+  const activeTenants = (occupancies || []).map((o: any) => ({
+    id: o.tenant?.id,
+    full_name: o.tenant?.full_name || 'Unknown',
+  })).filter((t: any) => t.id)
+
+  const totalActive = activeTenants.length
 
   const counts = {
     breakfast: { eating: totalActive - optOuts.breakfast.size, skipping: optOuts.breakfast.size },
@@ -67,7 +82,7 @@ export default function KitchenDisplay() {
   const skipping = counts[activeMeal].skipping
 
   // Get names of people skipping
-  const skippingTenants = mockTenants.filter((t) => optOuts[activeMeal].has(t.id))
+  const skippingTenants = activeTenants.filter((t: any) => optOuts[activeMeal].has(t.id))
 
   return (
     <div className="min-h-screen bg-slate-900 text-white">
@@ -144,7 +159,7 @@ export default function KitchenDisplay() {
             Skipping {cfg.label} ({skipping})
           </p>
           <div className="flex flex-wrap gap-2">
-            {skippingTenants.map((tenant) => (
+            {skippingTenants.map((tenant: any) => (
               <span
                 key={tenant.id}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-red-500/20 text-red-300 text-xs font-medium"
@@ -166,7 +181,7 @@ export default function KitchenDisplay() {
           {(['breakfast', 'lunch', 'dinner'] as MealType[]).map((meal) => {
             const mc = mealConfig[meal]
             const MealIcon = mc.icon
-            const pct = Math.round((counts[meal].eating / totalActive) * 100)
+            const pct = totalActive > 0 ? Math.round((counts[meal].eating / totalActive) * 100) : 0
             return (
               <div key={meal} className="bg-white/5 rounded-xl p-3">
                 <div className="flex items-center justify-between mb-1.5">

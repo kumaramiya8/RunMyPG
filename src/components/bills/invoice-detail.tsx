@@ -10,16 +10,10 @@ import {
   Building2,
   Calendar,
   FileText,
-  Receipt,
 } from 'lucide-react'
-import {
-  mockInvoices,
-  mockOccupancies,
-  mockTenants,
-  mockBeds,
-  mockRooms,
-  mockBuilding,
-} from '@/lib/mock-data'
+import { useQuery } from '@/lib/hooks/use-query'
+import { getInvoiceById } from '@/lib/services/billing'
+import { CardSkeleton } from '@/components/loading-skeleton'
 import type { InvoiceStatus } from '@/lib/types'
 
 function formatINR(amount: number): string {
@@ -38,8 +32,21 @@ const statusConfig: Record<InvoiceStatus, { icon: typeof CheckCircle; label: str
 }
 
 export default function InvoiceDetail({ invoiceId }: { invoiceId: string }) {
-  const invoice = mockInvoices.find((i) => i.id === invoiceId)
-  if (!invoice) {
+  const { data: invoice, loading, error } = useQuery(
+    () => getInvoiceById(invoiceId),
+    [invoiceId]
+  )
+
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        <CardSkeleton />
+        <CardSkeleton />
+      </div>
+    )
+  }
+
+  if (error || !invoice) {
     return (
       <div className="text-center py-10">
         <p className="text-sm text-slate-400">Invoice not found</p>
@@ -47,11 +54,11 @@ export default function InvoiceDetail({ invoiceId }: { invoiceId: string }) {
     )
   }
 
-  const occ = mockOccupancies.find((o) => o.id === invoice.occupancy_id)
-  const tenant = occ ? mockTenants.find((t) => t.id === occ.tenant_id) : undefined
-  const bed = occ ? mockBeds.find((b) => b.id === occ.bed_id) : undefined
-  const room = bed ? mockRooms.find((r) => r.id === bed.room_id) : undefined
-  const cfg = statusConfig[invoice.status]
+  const occ = (invoice as any).occupancy
+  const tenant = occ?.tenant
+  const bed = occ?.bed
+  const room = bed?.room
+  const cfg = statusConfig[invoice.status as InvoiceStatus]
   const StatusIcon = cfg.icon
 
   return (
@@ -72,14 +79,14 @@ export default function InvoiceDetail({ invoiceId }: { invoiceId: string }) {
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
               <span className="text-base font-bold text-primary">
-                {tenant?.full_name.split(' ').map((n) => n[0]).join('') || '?'}
+                {tenant?.full_name?.split(' ').map((n: string) => n[0]).join('') || '?'}
               </span>
             </div>
             <div>
-              <p className="text-base font-bold text-slate-900">{tenant?.full_name}</p>
+              <p className="text-base font-bold text-slate-900">{tenant?.full_name || 'Unknown'}</p>
               <p className="text-xs text-slate-500 flex items-center gap-1">
                 <Building2 className="w-3 h-3" />
-                {room?.name} - {bed?.bed_number} &middot; {mockBuilding.name}
+                {room?.name} - {bed?.bed_number}
               </p>
             </div>
           </div>
@@ -112,8 +119,12 @@ export default function InvoiceDetail({ invoiceId }: { invoiceId: string }) {
           <div className="mt-3 flex items-center gap-2 text-xs text-slate-400">
             <FileText className="w-3 h-3" />
             <span>Due Date: {formatDate(invoice.due_date)}</span>
-            <span className="text-slate-300">|</span>
-            <span>Rent Day: {occ?.rent_due_day}{ordinal(occ?.rent_due_day || 1)} of month</span>
+            {occ?.rent_due_day && (
+              <>
+                <span className="text-slate-300">|</span>
+                <span>Rent Day: {occ.rent_due_day}{ordinal(occ.rent_due_day)} of month</span>
+              </>
+            )}
           </div>
         </div>
       </div>

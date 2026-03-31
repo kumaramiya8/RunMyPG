@@ -12,14 +12,17 @@ const publicPaths = ['/login', '/signup']
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const isPublicPage = publicPaths.includes(pathname)
+  const isAdminPage = pathname.startsWith('/admin')
 
   return (
     <AuthProvider>
       {isPublicPage ? (
-        // Login/Signup — no sidebar, no nav, no auth guard
         <>{children}</>
+      ) : isAdminPage ? (
+        <AuthGuard>
+          {children}
+        </AuthGuard>
       ) : (
-        // Authenticated app shell
         <AuthGuard>
           <Sidebar />
           <div className="md:pl-64 flex flex-col min-h-full">

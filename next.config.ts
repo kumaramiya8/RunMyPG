@@ -1,11 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  output: "export",
-  images: {
-    unoptimized: true,
-  },
-  basePath: "/RunMyPG",
+  // No output: "export" — deploying to Vercel for full dynamic support
 };
 
 export default nextConfig;
