@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   ArrowLeft, Settings, Building2, IndianRupee, Bell, User, Shield,
-  Phone, Mail, Globe, ChevronRight, Camera, LogOut, Check, Lock,
+  Phone, Mail, Globe, ChevronRight, Camera, LogOut, Check, Lock, FileText,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
@@ -58,6 +58,12 @@ export default function SettingsPage() {
   const [orgDisplayName, setOrgDisplayName] = useState('')
   const [ownerPhone, setOwnerPhone] = useState('')
 
+  // Receipt customization
+  const [receiptHeader, setReceiptHeader] = useState('')
+  const [receiptFooter, setReceiptFooter] = useState('')
+  const [receiptPrefix, setReceiptPrefix] = useState('')
+  const [receiptShowGst, setReceiptShowGst] = useState(false)
+
   // Password change
   const [showPasswordChange, setShowPasswordChange] = useState(false)
   const [newPassword, setNewPassword] = useState('')
@@ -68,7 +74,7 @@ export default function SettingsPage() {
     if (!orgId) return
     supabase
       .from('organizations')
-      .select('name, gst_enabled, gst_number, auto_rent_reminders, whatsapp_receipts, meal_notifications, complaint_alerts, phone')
+      .select('name, gst_enabled, gst_number, auto_rent_reminders, whatsapp_receipts, meal_notifications, complaint_alerts, phone, receipt_header, receipt_footer, receipt_prefix, receipt_show_gst')
       .eq('id', orgId)
       .single()
       .then(({ data }) => {
@@ -81,6 +87,10 @@ export default function SettingsPage() {
           setMealNotifications(data.meal_notifications ?? true)
           setComplaintAlerts(data.complaint_alerts ?? true)
           setOwnerPhone(data.phone || '')
+          setReceiptHeader(data.receipt_header || '')
+          setReceiptFooter(data.receipt_footer || '')
+          setReceiptPrefix(data.receipt_prefix || '')
+          setReceiptShowGst(data.receipt_show_gst ?? false)
         }
       })
   }, [orgId])
@@ -235,6 +245,56 @@ export default function SettingsPage() {
               desc={accountSlug || ''}
               right={<span className="text-[10px] font-mono text-slate-400 bg-slate-100 px-2 py-0.5 rounded">{accountSlug}</span>}
               color="bg-slate-100 text-slate-500"
+            />
+          </div>
+        </div>
+
+        {/* Receipt Customization */}
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-2 px-1">Receipt Customization</p>
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 divide-y divide-slate-50 overflow-hidden">
+            <div className="px-4 py-3">
+              <label className="text-xs font-semibold text-slate-600 mb-1 block">Receipt Header Text</label>
+              <input
+                type="text"
+                value={receiptHeader}
+                onChange={(e) => setReceiptHeader(e.target.value)}
+                onBlur={() => saveOrgSettings('receipt_header', receiptHeader)}
+                placeholder="e.g., Premium PG Accommodation"
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+              />
+              <p className="text-[10px] text-slate-400 mt-1">Shown below the organization name on receipts</p>
+            </div>
+            <div className="px-4 py-3">
+              <label className="text-xs font-semibold text-slate-600 mb-1 block">Receipt Footer Text</label>
+              <input
+                type="text"
+                value={receiptFooter}
+                onChange={(e) => setReceiptFooter(e.target.value)}
+                onBlur={() => saveOrgSettings('receipt_footer', receiptFooter)}
+                placeholder="e.g., Thank you for choosing us!"
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+              />
+              <p className="text-[10px] text-slate-400 mt-1">Shown at the bottom of each receipt</p>
+            </div>
+            <div className="px-4 py-3">
+              <label className="text-xs font-semibold text-slate-600 mb-1 block">Receipt Number Prefix</label>
+              <input
+                type="text"
+                value={receiptPrefix}
+                onChange={(e) => setReceiptPrefix(e.target.value)}
+                onBlur={() => saveOrgSettings('receipt_prefix', receiptPrefix)}
+                placeholder="e.g., RCP"
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+              />
+              <p className="text-[10px] text-slate-400 mt-1">Prefix added before receipt numbers (default: RCP)</p>
+            </div>
+            <SettingRow
+              icon={FileText}
+              label="Show GST on Receipts"
+              desc={receiptShowGst ? 'CGST + SGST breakdown shown' : 'GST not shown on receipts'}
+              right={<Toggle enabled={receiptShowGst} onToggle={() => toggleAndSave('receipt_show_gst', receiptShowGst, setReceiptShowGst)} />}
+              color="bg-violet-50 text-violet-500"
             />
           </div>
         </div>

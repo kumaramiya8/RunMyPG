@@ -11,6 +11,7 @@ import { useQuery, useMutation } from '@/lib/hooks/use-query'
 import { getInvoices, recordPayment, recordDepositPayment, recordAdvanceRent, getPaymentsForOccupancy } from '@/lib/services/billing'
 import { getActiveOccupancies } from '@/lib/services/tenants'
 import { ListSkeleton } from '@/components/loading-skeleton'
+import Link from 'next/link'
 
 function formatINR(amount: number): string {
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount)
@@ -36,6 +37,7 @@ export default function CollectRent() {
   const [customAmount, setCustomAmount] = useState('')
   const [advanceMonths, setAdvanceMonths] = useState(1)
   const [confirmed, setConfirmed] = useState(false)
+  const [lastPaymentId, setLastPaymentId] = useState<string | null>(null)
   const [paying, setPaying] = useState(false)
   const [error, setError] = useState('')
 
@@ -88,10 +90,11 @@ export default function CollectRent() {
     setError('')
     try {
       const amount = customAmount ? Number(customAmount) : Number(selectedInv.invoice.total_amount)
-      await recordPayment(
+      const payment = await recordPayment(
         orgId, selectedInv.invoice.id, selectedInv.invoice.occupancy_id,
         amount, paymentMethod, 'rent', transactionRef || undefined
       )
+      setLastPaymentId(payment?.id || null)
       setConfirmed(true)
       refetchInvoices()
     } catch (err: any) {
@@ -104,7 +107,8 @@ export default function CollectRent() {
     setPaying(true)
     setError('')
     try {
-      await recordDepositPayment(orgId, selectedTenant.occupancy.id, Number(customAmount), paymentMethod, transactionRef || undefined)
+      const depositPayment = await recordDepositPayment(orgId, selectedTenant.occupancy.id, Number(customAmount), paymentMethod, transactionRef || undefined)
+      setLastPaymentId(depositPayment?.id || null)
       setConfirmed(true)
     } catch (err: any) {
       setError(err.message || 'Payment failed')
@@ -117,7 +121,8 @@ export default function CollectRent() {
     setError('')
     try {
       const amount = Number(selectedTenant.occupancy.monthly_rent) * advanceMonths
-      await recordAdvanceRent(orgId, selectedTenant.occupancy.id, amount, advanceMonths, paymentMethod, transactionRef || undefined)
+      const advancePayment = await recordAdvanceRent(orgId, selectedTenant.occupancy.id, amount, advanceMonths, paymentMethod, transactionRef || undefined)
+      setLastPaymentId(advancePayment?.id || null)
       setConfirmed(true)
     } catch (err: any) {
       setError(err.message || 'Payment failed')
@@ -135,8 +140,16 @@ export default function CollectRent() {
           {tab === 'rent' ? 'Rent payment' : tab === 'deposit' ? 'Deposit' : 'Advance rent'} has been recorded successfully
         </p>
         <div className="flex gap-2 mt-6 max-w-xs mx-auto">
+          {lastPaymentId && (
+            <Link
+              href={`/bills/receipt/${lastPaymentId}`}
+              className="flex-1 py-2.5 bg-slate-100 text-slate-700 font-semibold rounded-xl text-sm text-center hover:bg-slate-200 active:scale-[0.98] transition-all"
+            >
+              View Receipt
+            </Link>
+          )}
           <button
-            onClick={() => { setConfirmed(false); setSelectedInvoice(null); setSelectedOccupancy(null); setCustomAmount(''); setTransactionRef('') }}
+            onClick={() => { setConfirmed(false); setSelectedInvoice(null); setSelectedOccupancy(null); setCustomAmount(''); setTransactionRef(''); setLastPaymentId(null) }}
             className="flex-1 py-2.5 bg-primary text-white font-semibold rounded-xl text-sm hover:bg-primary-dark active:scale-[0.98] transition-all"
           >
             Collect Another

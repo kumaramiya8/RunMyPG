@@ -149,6 +149,16 @@ export async function recordAdvanceRent(
   return payment
 }
 
+export async function getPaymentById(paymentId: string) {
+  const { data, error } = await supabase
+    .from('payments')
+    .select('*, occupancy:occupancies(*, tenant:tenants(*), bed:beds(*, room:rooms(*)))')
+    .eq('id', paymentId)
+    .single()
+  if (error) throw error
+  return data
+}
+
 export async function getPaymentsForOccupancy(occupancyId: string) {
   const { data, error } = await supabase
     .from('payments')
