@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { LogoFull } from './logo'
+import { useAuth } from '@/lib/auth-context'
 import {
   LayoutDashboard,
   BedDouble,
@@ -72,6 +73,27 @@ function NavSection({ title, items }: { title: string; items: typeof mainNav }) 
   )
 }
 
+function SidebarUser() {
+  const { staffName, staffRole } = useAuth()
+  const name = staffName || 'User'
+  const initials = name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
+  const role = staffRole ? staffRole.charAt(0).toUpperCase() + staffRole.slice(1) : 'Staff'
+
+  return (
+    <div className="p-3 border-t border-slate-200">
+      <div className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 cursor-pointer">
+        <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+          <span className="text-xs font-bold text-primary">{initials}</span>
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-slate-900 truncate">{name}</p>
+          <p className="text-[11px] text-slate-400">{role}</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function Sidebar() {
   return (
     <aside className="hidden md:flex md:w-64 md:flex-col md:fixed md:inset-y-0 bg-white border-r border-slate-200">
@@ -88,17 +110,7 @@ export default function Sidebar() {
       </nav>
 
       {/* Bottom user area */}
-      <div className="p-3 border-t border-slate-200">
-        <div className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 cursor-pointer">
-          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-            <span className="text-xs font-bold text-primary">AK</span>
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-slate-900 truncate">Amit Kumar</p>
-            <p className="text-[11px] text-slate-400">Owner</p>
-          </div>
-        </div>
-      </div>
+      <SidebarUser />
     </aside>
   )
 }
