@@ -18,12 +18,13 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
     }
 
     // Redirect tenant away from owner pages
-    if (user && isTenant && !pathname.startsWith('/tenant') && pathname !== '/login') {
+    const isTenantRoute = pathname === '/tenant' || pathname.startsWith('/tenant/')
+    if (user && isTenant && !isTenantRoute && pathname !== '/login') {
       router.replace('/tenant')
     }
 
     // Redirect staff away from tenant pages
-    if (user && !isTenant && userRole && pathname.startsWith('/tenant')) {
+    if (user && !isTenant && userRole && isTenantRoute) {
       router.replace('/')
     }
   }, [user, loading, isTenant, userRole, pathname, router])

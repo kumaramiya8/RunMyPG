@@ -20,7 +20,7 @@ import {
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { useQuery, useMutation } from '@/lib/hooks/use-query'
-import { getFullPropertyTree, createBuilding, createFloor, createRoom } from '@/lib/services/property'
+import { getFullPropertyTree, createBuilding, createFloor, createRoom, deleteFloor, deleteRoom, deleteBuilding } from '@/lib/services/property'
 import { ListSkeleton, EmptyState } from '@/components/loading-skeleton'
 
 // ── Add Building Modal ──────────────────────────────────────────────
@@ -431,6 +431,36 @@ export default function BuildingSetup() {
     }
   }
 
+  const handleDeleteFloor = async (floorId: string, floorName: string) => {
+    const fRooms = floorRooms(floorId)
+    const fBeds = fRooms.reduce((sum: number, r: any) => sum + roomBeds(r.id).length, 0)
+    const confirmed = window.confirm(
+      `Delete "${floorName}"? This will permanently delete all ${fRooms.length} room(s) and ${fBeds} bed(s) on this floor. This action cannot be undone.`
+    )
+    if (!confirmed) return
+    try {
+      await deleteFloor(floorId)
+      refetch()
+    } catch (err) {
+      console.error('Failed to delete floor:', err)
+      alert('Failed to delete floor. Please try again.')
+    }
+  }
+
+  const handleDeleteRoom = async (roomId: string, roomName: string, bedCount: number) => {
+    const confirmed = window.confirm(
+      `Delete room "${roomName}"? This will permanently delete the room and its ${bedCount} bed(s). This action cannot be undone.`
+    )
+    if (!confirmed) return
+    try {
+      await deleteRoom(roomId)
+      refetch()
+    } catch (err) {
+      console.error('Failed to delete room:', err)
+      alert('Failed to delete room. Please try again.')
+    }
+  }
+
   if (buildings.length === 0) {
     return (
       <>
@@ -515,6 +545,13 @@ export default function BuildingSetup() {
                         </span>
                       </div>
                       <button
+                        onClick={(e) => { e.stopPropagation(); handleDeleteFloor(floor.id, floor.name) }}
+                        className="p-1.5 rounded-lg bg-slate-100 hover:bg-red-50 transition-colors mr-1"
+                        title="Delete floor"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-slate-400 hover:text-red-500" />
+                      </button>
+                      <button
                         onClick={(e) => { e.stopPropagation(); setCopyFloorSource({ floorId: floor.id, floorName: floor.name, buildingId: building.id }) }}
                         className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 transition-colors mr-1"
                         title="Copy floor"
@@ -552,7 +589,10 @@ export default function BuildingSetup() {
                                   <button className="p-1 rounded hover:bg-white transition-colors">
                                     <Pencil className="w-3 h-3 text-slate-400" />
                                   </button>
-                                  <button className="p-1 rounded hover:bg-white transition-colors">
+                                  <button
+                                    onClick={() => handleDeleteRoom(room.id, room.name, rBeds.length)}
+                                    className="p-1 rounded hover:bg-white transition-colors"
+                                  >
                                     <Trash2 className="w-3 h-3 text-slate-300 hover:text-red-400" />
                                   </button>
                                 </div>

@@ -134,3 +134,28 @@ export async function createRoom(
 
   return room
 }
+
+export async function deleteFloor(floorId: string) {
+  // Beds and rooms cascade-delete via foreign keys
+  const { error } = await supabase
+    .from('floors')
+    .delete()
+    .eq('id', floorId)
+  if (error) throw error
+}
+
+export async function deleteRoom(roomId: string) {
+  const { error } = await supabase
+    .from('rooms')
+    .delete()
+    .eq('id', roomId)
+  if (error) throw error
+}
+
+export async function deleteBuilding(buildingId: string) {
+  const { error } = await supabase
+    .from('buildings')
+    .delete()
+    .eq('id', buildingId)
+  if (error) throw error
+}

@@ -16,7 +16,7 @@ function ShellContent({ children }: { children: React.ReactNode }) {
   const { isTenant } = useAuth()
   const isPublicPage = publicPaths.includes(pathname)
   const isAdminPage = pathname.startsWith('/admin')
-  const isTenantPage = pathname.startsWith('/tenant')
+  const isTenantPage = pathname === '/tenant' || pathname.startsWith('/tenant/')
 
   if (isPublicPage) return <>{children}</>
 

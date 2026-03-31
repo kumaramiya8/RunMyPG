@@ -159,6 +159,51 @@ export async function getPaymentById(paymentId: string) {
   return data
 }
 
+export async function updatePayment(paymentId: string, updates: { amount?: number; payment_method?: string; transaction_ref?: string; notes?: string }) {
+  const { data, error } = await supabase
+    .from('payments')
+    .update(updates)
+    .eq('id', paymentId)
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function deletePayment(paymentId: string) {
+  // Get the payment first to update the invoice
+  const { data: payment } = await supabase
+    .from('payments')
+    .select('invoice_id, amount')
+    .eq('id', paymentId)
+    .single()
+
+  // Delete the payment
+  const { error } = await supabase
+    .from('payments')
+    .delete()
+    .eq('id', paymentId)
+  if (error) throw error
+
+  // If linked to an invoice, update the invoice amount_paid
+  if (payment?.invoice_id) {
+    const { data: invoice } = await supabase
+      .from('invoices')
+      .select('amount_paid, total_amount')
+      .eq('id', payment.invoice_id)
+      .single()
+
+    if (invoice) {
+      const newPaid = Math.max(0, Number(invoice.amount_paid || 0) - Number(payment.amount))
+      const newStatus = newPaid <= 0 ? 'pending' : newPaid >= Number(invoice.total_amount) ? 'paid' : 'partially_paid'
+      await supabase
+        .from('invoices')
+        .update({ amount_paid: newPaid, status: newStatus })
+        .eq('id', payment.invoice_id)
+    }
+  }
+}
+
 export async function getPaymentsForOccupancy(occupancyId: string) {
   const { data, error } = await supabase
     .from('payments')

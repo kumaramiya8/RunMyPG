@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import {
   IndianRupee,
   CheckCircle,
@@ -10,9 +11,19 @@ import {
   Building2,
   Calendar,
   FileText,
+  Pencil,
+  Trash2,
+  X,
+  Check,
+  Loader2,
 } from 'lucide-react'
 import { useQuery } from '@/lib/hooks/use-query'
-import { getInvoiceById } from '@/lib/services/billing'
+import {
+  getInvoiceById,
+  getPaymentsForOccupancy,
+  updatePayment,
+  deletePayment,
+} from '@/lib/services/billing'
 import { CardSkeleton } from '@/components/loading-skeleton'
 import type { InvoiceStatus } from '@/lib/types'
 
@@ -31,11 +42,44 @@ const statusConfig: Record<InvoiceStatus, { icon: typeof CheckCircle; label: str
   overdue: { icon: AlertTriangle, label: 'Overdue', color: 'text-red-600', bg: 'bg-red-50', border: 'border-red-200' },
 }
 
+const paymentMethodLabels: Record<string, string> = {
+  cash: 'Cash',
+  upi: 'UPI',
+  bank_transfer: 'Bank Transfer',
+  card: 'Card',
+  cheque: 'Cheque',
+  other: 'Other',
+}
+
+const paymentTypeLabels: Record<string, string> = {
+  rent: 'Rent',
+  deposit: 'Deposit',
+  advance: 'Advance',
+  maintenance: 'Maintenance',
+  other: 'Other',
+}
+
 export default function InvoiceDetail({ invoiceId }: { invoiceId: string }) {
-  const { data: invoice, loading, error } = useQuery(
+  const { data: invoice, loading, error, refetch: refetchInvoice } = useQuery(
     () => getInvoiceById(invoiceId),
     [invoiceId]
   )
+
+  const occupancyId = (invoice as any)?.occupancy_id
+  const {
+    data: payments,
+    loading: paymentsLoading,
+    refetch: refetchPayments,
+  } = useQuery(
+    () => (occupancyId ? getPaymentsForOccupancy(occupancyId) : Promise.resolve([])),
+    [occupancyId]
+  )
+
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState({ amount: '', payment_method: '', transaction_ref: '' })
+  const [editSaving, setEditSaving] = useState(false)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
 
   if (loading) {
     return (
@@ -60,6 +104,52 @@ export default function InvoiceDetail({ invoiceId }: { invoiceId: string }) {
   const room = bed?.room
   const cfg = statusConfig[invoice.status as InvoiceStatus]
   const StatusIcon = cfg.icon
+
+  function startEdit(payment: any) {
+    setEditingId(payment.id)
+    setEditForm({
+      amount: String(payment.amount),
+      payment_method: payment.payment_method || '',
+      transaction_ref: payment.transaction_ref || '',
+    })
+  }
+
+  function cancelEdit() {
+    setEditingId(null)
+    setEditForm({ amount: '', payment_method: '', transaction_ref: '' })
+  }
+
+  async function saveEdit(paymentId: string) {
+    setEditSaving(true)
+    try {
+      const updates: Record<string, unknown> = {}
+      if (editForm.amount) updates.amount = Number(editForm.amount)
+      if (editForm.payment_method) updates.payment_method = editForm.payment_method
+      updates.transaction_ref = editForm.transaction_ref || null
+      await updatePayment(paymentId, updates as any)
+      setEditingId(null)
+      refetchPayments()
+      refetchInvoice()
+    } catch (err) {
+      console.error('Failed to update payment:', err)
+    } finally {
+      setEditSaving(false)
+    }
+  }
+
+  async function handleDelete(paymentId: string) {
+    setDeletingId(paymentId)
+    try {
+      await deletePayment(paymentId)
+      setConfirmDeleteId(null)
+      refetchPayments()
+      refetchInvoice()
+    } catch (err) {
+      console.error('Failed to delete payment:', err)
+    } finally {
+      setDeletingId(null)
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -149,6 +239,161 @@ export default function InvoiceDetail({ invoiceId }: { invoiceId: string }) {
           </div>
         </div>
       )}
+
+      {/* Payment History */}
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+        <div className="px-4 py-3 border-b border-slate-100">
+          <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Payment History</h3>
+        </div>
+
+        {paymentsLoading ? (
+          <div className="p-4">
+            <CardSkeleton />
+          </div>
+        ) : !payments || payments.length === 0 ? (
+          <div className="p-6 text-center">
+            <p className="text-sm text-slate-400">No payments recorded yet</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-slate-50">
+            {payments.map((payment: any) => (
+              <div key={payment.id} className="p-4">
+                {editingId === payment.id ? (
+                  /* Inline edit form */
+                  <div className="space-y-3">
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-slate-500">Amount</label>
+                      <input
+                        type="number"
+                        value={editForm.amount}
+                        onChange={(e) => setEditForm((f) => ({ ...f, amount: e.target.value }))}
+                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                        placeholder="Amount"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-slate-500">Payment Method</label>
+                      <select
+                        value={editForm.payment_method}
+                        onChange={(e) => setEditForm((f) => ({ ...f, payment_method: e.target.value }))}
+                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white"
+                      >
+                        <option value="cash">Cash</option>
+                        <option value="upi">UPI</option>
+                        <option value="bank_transfer">Bank Transfer</option>
+                        <option value="card">Card</option>
+                        <option value="cheque">Cheque</option>
+                        <option value="other">Other</option>
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-slate-500">Transaction Ref</label>
+                      <input
+                        type="text"
+                        value={editForm.transaction_ref}
+                        onChange={(e) => setEditForm((f) => ({ ...f, transaction_ref: e.target.value }))}
+                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                        placeholder="Transaction reference (optional)"
+                      />
+                    </div>
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        onClick={() => saveEdit(payment.id)}
+                        disabled={editSaving}
+                        className="flex-1 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
+                      >
+                        {editSaving ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Check className="w-3.5 h-3.5" />
+                        )}
+                        Save
+                      </button>
+                      <button
+                        onClick={cancelEdit}
+                        disabled={editSaving}
+                        className="flex-1 py-2 bg-white text-slate-600 text-sm font-medium rounded-lg border border-slate-200 hover:bg-slate-50 active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : confirmDeleteId === payment.id ? (
+                  /* Delete confirmation */
+                  <div className="space-y-3">
+                    <p className="text-sm text-slate-700">
+                      Delete this payment of <span className="font-bold">{formatINR(payment.amount)}</span>? This cannot be undone.
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => handleDelete(payment.id)}
+                        disabled={deletingId === payment.id}
+                        className="flex-1 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
+                      >
+                        {deletingId === payment.id ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Trash2 className="w-3.5 h-3.5" />
+                        )}
+                        Confirm Delete
+                      </button>
+                      <button
+                        onClick={() => setConfirmDeleteId(null)}
+                        disabled={deletingId === payment.id}
+                        className="flex-1 py-2 bg-white text-slate-600 text-sm font-medium rounded-lg border border-slate-200 hover:bg-slate-50 active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  /* Normal payment row */
+                  <div className="flex items-start justify-between">
+                    <div className="space-y-1 min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold text-slate-900">{formatINR(payment.amount)}</span>
+                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 uppercase">
+                          {paymentTypeLabels[payment.payment_type] || payment.payment_type}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-slate-500">
+                        <span>{paymentMethodLabels[payment.payment_method] || payment.payment_method}</span>
+                        {payment.transaction_ref && (
+                          <>
+                            <span className="text-slate-300">|</span>
+                            <span className="truncate">{payment.transaction_ref}</span>
+                          </>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-400">
+                        {payment.payment_date ? formatDate(payment.payment_date) : formatDate(payment.created_at)}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1 ml-2 shrink-0">
+                      <button
+                        onClick={() => startEdit(payment)}
+                        className="p-2 rounded-lg text-slate-400 hover:text-primary hover:bg-primary/5 transition-colors"
+                        aria-label="Edit payment"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => setConfirmDeleteId(payment.id)}
+                        className="p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                        aria-label="Delete payment"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* Actions */}
       <div className="space-y-2">
