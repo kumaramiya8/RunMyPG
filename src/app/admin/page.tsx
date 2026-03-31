@@ -80,16 +80,21 @@ export default function AdminDashboard() {
       return
     }
 
-    const { error } = await supabase.rpc('master_create_account', {
-      p_account_slug: slug,
-      p_org_name: newName,
-      p_owner_name: newOwnerName,
-      p_owner_email: newOwnerEmail,
-      p_owner_password: newOwnerPassword,
+    const res = await fetch('/api/admin/create-account', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        accountSlug: slug,
+        orgName: newName,
+        ownerName: newOwnerName,
+        ownerEmail: newOwnerEmail,
+        ownerPassword: newOwnerPassword,
+      }),
     })
+    const result = await res.json()
 
-    if (error) {
-      setCreateError(error.message)
+    if (!res.ok) {
+      setCreateError(result.error || 'Failed to create account')
       setCreating(false)
       return
     }
@@ -105,7 +110,11 @@ export default function AdminDashboard() {
   }
 
   const handleDelete = async (orgId: string) => {
-    await supabase.rpc('master_delete_account', { p_org_id: orgId })
+    await fetch('/api/admin/delete-account', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orgId }),
+    })
     setDeleteId(null)
     fetchAccounts()
   }
