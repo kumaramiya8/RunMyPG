@@ -47,35 +47,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return
     }
 
-    // Find the org by slug
-    const { data: org } = await supabase
-      .from('organizations')
-      .select('id, name, account_slug, account_type')
-      .eq('account_slug', accountSlug)
-      .single()
+    // Use SECURITY DEFINER function to get staff+org info (bypasses RLS)
+    const { data: staffRows } = await supabase.rpc('get_my_staff_info', {
+      p_user_id: userId,
+    })
+    const info = staffRows?.[0] ?? null
 
-    if (!org) {
+    if (!info || info.account_slug !== accountSlug) {
       setState((prev) => ({ ...prev, loading: false }))
       return
     }
 
-    // Find the staff record for this user in this org
-    const { data: staff } = await supabase
-      .from('staff_members')
-      .select('role, name')
-      .eq('user_id', userId)
-      .eq('org_id', org.id)
-      .eq('is_active', true)
-      .single()
-
     setState((prev) => ({
       ...prev,
-      orgId: org.id,
-      orgName: org.name,
-      accountSlug: org.account_slug,
-      accountType: org.account_type,
-      staffRole: staff?.role ?? null,
-      staffName: staff?.name ?? null,
+      orgId: info.org_id,
+      orgName: info.org_name,
+      accountSlug: info.account_slug,
+      accountType: info.account_type,
+      staffRole: info.staff_role,
+      staffName: info.staff_name,
     }))
   }, [])
 
@@ -128,16 +118,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (authError) return { error: authError.message }
     if (!authData.user) return { error: 'Login failed' }
 
-    // 3. Verify user belongs to this org
-    const { data: staff } = await supabase
-      .from('staff_members')
-      .select('id')
-      .eq('user_id', authData.user.id)
-      .eq('org_id', org.id)
-      .eq('is_active', true)
-      .single()
+    // 3. Verify user belongs to this org (using SECURITY DEFINER function)
+    const { data: staffRows } = await supabase.rpc('get_staff_for_org', {
+      p_user_id: authData.user.id,
+      p_org_id: org.id,
+    })
 
-    if (!staff) {
+    if (!staffRows?.length) {
       await supabase.auth.signOut()
       return { error: 'You do not have access to this account.' }
     }
