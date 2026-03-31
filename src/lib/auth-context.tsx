@@ -85,33 +85,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (authError) return { error: authError.message }
     if (!authData.user) return { error: 'Failed to create account' }
 
-    // 2. Create organization
-    const { data: org, error: orgError } = await supabase
-      .from('organizations')
-      .insert({ name: orgName, owner_id: authData.user.id })
-      .select('id')
-      .single()
+    // 2. Create org + owner via SECURITY DEFINER function (bypasses RLS)
+    const { error: rpcError } = await supabase.rpc('create_org_and_owner', {
+      p_org_name: orgName,
+      p_owner_name: ownerName,
+      p_user_id: authData.user.id,
+    })
 
-    if (orgError) return { error: orgError.message }
-
-    // 3. Create owner staff record
-    const { error: staffError } = await supabase
-      .from('staff_members')
-      .insert({
-        org_id: org.id,
-        user_id: authData.user.id,
-        name: ownerName,
-        role: 'owner',
-        can_view_beds: true,
-        can_manage_checkins: true,
-        can_view_complaints: true,
-        can_view_finances: true,
-        can_manage_expenses: true,
-        can_view_reports: true,
-        is_active: true,
-      })
-
-    if (staffError) return { error: staffError.message }
+    if (rpcError) return { error: rpcError.message }
 
     return { error: null }
   }
