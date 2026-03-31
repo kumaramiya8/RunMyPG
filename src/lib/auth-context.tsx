@@ -115,12 +115,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [fetchOrgAndStaff])
 
   const signIn = async (accountSlug: string, email: string, password: string) => {
-    // 1. Verify the account slug exists
-    const { data: org } = await supabase
-      .from('organizations')
-      .select('id, account_type')
-      .eq('account_slug', accountSlug.toLowerCase().trim())
-      .single()
+    // 1. Verify the account slug exists (uses SECURITY DEFINER function to bypass RLS)
+    const { data: orgRows } = await supabase.rpc('get_org_by_slug', {
+      p_slug: accountSlug.toLowerCase().trim(),
+    })
+    const org = orgRows?.[0] ?? null
 
     if (!org) return { error: 'Account not found. Check the account name.' }
 
