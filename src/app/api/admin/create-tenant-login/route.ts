@@ -73,7 +73,8 @@ export async function POST(request: NextRequest) {
       .eq('id', tenantId)
 
     return NextResponse.json({ userId })
-  } catch {
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  } catch (err: any) {
+    console.error('create-tenant-login error:', err)
+    return NextResponse.json({ error: err?.message || 'Internal server error' }, { status: 500 })
   }
 }
