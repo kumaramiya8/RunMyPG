@@ -4,7 +4,7 @@
 -- ============================================================
 
 -- Helper function: get the current user's org_id
-CREATE OR REPLACE FUNCTION auth.user_org_id()
+CREATE OR REPLACE FUNCTION public.user_org_id()
 RETURNS UUID AS $$
   SELECT org_id FROM public.staff_members
   WHERE user_id = auth.uid() AND is_active = true
@@ -37,11 +37,11 @@ ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Users can view their organization"
   ON organizations FOR SELECT
-  USING (id = auth.user_org_id());
+  USING (id = public.user_org_id());
 
 CREATE POLICY "Users can update their organization"
   ON organizations FOR UPDATE
-  USING (id = auth.user_org_id());
+  USING (id = public.user_org_id());
 
 -- Allow insert during signup (before staff record exists)
 CREATE POLICY "Authenticated users can create organizations"
@@ -54,15 +54,15 @@ CREATE POLICY "Authenticated users can create organizations"
 
 CREATE POLICY "Users can view org staff"
   ON staff_members FOR SELECT
-  USING (org_id = auth.user_org_id());
+  USING (org_id = public.user_org_id());
 
 CREATE POLICY "Users can insert staff to their org"
   ON staff_members FOR INSERT
-  WITH CHECK (org_id = auth.user_org_id() OR auth.uid() IS NOT NULL);
+  WITH CHECK (org_id = public.user_org_id() OR auth.uid() IS NOT NULL);
 
 CREATE POLICY "Users can update org staff"
   ON staff_members FOR UPDATE
-  USING (org_id = auth.user_org_id());
+  USING (org_id = public.user_org_id());
 
 -- ============================================================
 -- Buildings: org-scoped
@@ -70,15 +70,15 @@ CREATE POLICY "Users can update org staff"
 
 CREATE POLICY "Users can view org buildings"
   ON buildings FOR SELECT
-  USING (org_id = auth.user_org_id());
+  USING (org_id = public.user_org_id());
 
 CREATE POLICY "Users can manage org buildings"
   ON buildings FOR INSERT
-  WITH CHECK (org_id = auth.user_org_id());
+  WITH CHECK (org_id = public.user_org_id());
 
 CREATE POLICY "Users can update org buildings"
   ON buildings FOR UPDATE
-  USING (org_id = auth.user_org_id());
+  USING (org_id = public.user_org_id());
 
 -- ============================================================
 -- Floors: through building → org
@@ -86,11 +86,11 @@ CREATE POLICY "Users can update org buildings"
 
 CREATE POLICY "Users can view floors"
   ON floors FOR SELECT
-  USING (building_id IN (SELECT id FROM buildings WHERE org_id = auth.user_org_id()));
+  USING (building_id IN (SELECT id FROM buildings WHERE org_id = public.user_org_id()));
 
 CREATE POLICY "Users can manage floors"
   ON floors FOR ALL
-  USING (building_id IN (SELECT id FROM buildings WHERE org_id = auth.user_org_id()));
+  USING (building_id IN (SELECT id FROM buildings WHERE org_id = public.user_org_id()));
 
 -- ============================================================
 -- Rooms: through floor → building → org
@@ -101,7 +101,7 @@ CREATE POLICY "Users can view rooms"
   USING (floor_id IN (
     SELECT f.id FROM floors f
     JOIN buildings b ON f.building_id = b.id
-    WHERE b.org_id = auth.user_org_id()
+    WHERE b.org_id = public.user_org_id()
   ));
 
 CREATE POLICY "Users can manage rooms"
@@ -109,7 +109,7 @@ CREATE POLICY "Users can manage rooms"
   USING (floor_id IN (
     SELECT f.id FROM floors f
     JOIN buildings b ON f.building_id = b.id
-    WHERE b.org_id = auth.user_org_id()
+    WHERE b.org_id = public.user_org_id()
   ));
 
 -- ============================================================
@@ -122,7 +122,7 @@ CREATE POLICY "Users can view beds"
     SELECT r.id FROM rooms r
     JOIN floors f ON r.floor_id = f.id
     JOIN buildings b ON f.building_id = b.id
-    WHERE b.org_id = auth.user_org_id()
+    WHERE b.org_id = public.user_org_id()
   ));
 
 CREATE POLICY "Users can manage beds"
@@ -131,19 +131,19 @@ CREATE POLICY "Users can manage beds"
     SELECT r.id FROM rooms r
     JOIN floors f ON r.floor_id = f.id
     JOIN buildings b ON f.building_id = b.id
-    WHERE b.org_id = auth.user_org_id()
+    WHERE b.org_id = public.user_org_id()
   ));
 
 -- ============================================================
 -- Tenants, Invoices, Expenses, Complaints, etc: org-scoped
 -- ============================================================
 
-CREATE POLICY "org_tenants" ON tenants FOR ALL USING (org_id = auth.user_org_id());
-CREATE POLICY "org_invoices" ON invoices FOR ALL USING (org_id = auth.user_org_id());
-CREATE POLICY "org_payments" ON payments FOR ALL USING (org_id = auth.user_org_id());
-CREATE POLICY "org_expenses" ON expenses FOR ALL USING (org_id = auth.user_org_id());
-CREATE POLICY "org_complaints" ON complaints FOR ALL USING (org_id = auth.user_org_id());
-CREATE POLICY "org_meal_optouts" ON meal_optouts FOR ALL USING (org_id = auth.user_org_id());
-CREATE POLICY "org_messages" ON messages FOR ALL USING (org_id = auth.user_org_id());
+CREATE POLICY "org_tenants" ON tenants FOR ALL USING (org_id = public.user_org_id());
+CREATE POLICY "org_invoices" ON invoices FOR ALL USING (org_id = public.user_org_id());
+CREATE POLICY "org_payments" ON payments FOR ALL USING (org_id = public.user_org_id());
+CREATE POLICY "org_expenses" ON expenses FOR ALL USING (org_id = public.user_org_id());
+CREATE POLICY "org_complaints" ON complaints FOR ALL USING (org_id = public.user_org_id());
+CREATE POLICY "org_meal_optouts" ON meal_optouts FOR ALL USING (org_id = public.user_org_id());
+CREATE POLICY "org_messages" ON messages FOR ALL USING (org_id = public.user_org_id());
 CREATE POLICY "org_occupancies" ON occupancies FOR ALL USING (true); -- filtered via tenant/bed joins
 CREATE POLICY "org_advance_bookings" ON advance_bookings FOR ALL USING (true); -- filtered via bed joins
