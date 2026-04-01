@@ -330,17 +330,17 @@ export default function CheckinForm({ preselectedBedId }: { preselectedBedId?: s
           <div>
             <label className="text-xs font-semibold text-slate-600 mb-1 block">Gender</label>
             <div className="flex gap-2">
-              {['Male', 'Female', 'Other'].map((g) => (
+              {[{ label: 'Male', value: 'male' }, { label: 'Female', value: 'female' }, { label: 'Other', value: 'other' }].map((g) => (
                 <button
-                  key={g}
-                  onClick={() => setGender(g)}
+                  key={g.value}
+                  onClick={() => setGender(g.value)}
                   className={`flex-1 py-2 rounded-xl border text-sm font-medium transition-all ${
-                    gender === g
+                    gender === g.value
                       ? 'border-primary bg-primary/5 text-primary'
                       : 'border-slate-200 text-slate-600 hover:border-primary hover:text-primary'
                   }`}
                 >
-                  {g}
+                  {g.label}
                 </button>
               ))}
             </div>
