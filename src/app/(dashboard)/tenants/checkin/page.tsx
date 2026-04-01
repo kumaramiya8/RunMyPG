@@ -2,9 +2,13 @@
 
 import { ArrowLeft, UserPlus } from 'lucide-react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import CheckinForm from '@/components/tenants/checkin-form'
 
 export default function CheckinPage() {
+  const searchParams = useSearchParams()
+  const preselectedBedId = searchParams.get('bed') || undefined
+
   return (
     <div className="px-4 py-4 md:px-8 md:py-6 max-w-lg mx-auto">
       <div className="flex items-center gap-3 mb-5">
@@ -24,7 +28,7 @@ export default function CheckinPage() {
           </div>
         </div>
       </div>
-      <CheckinForm />
+      <CheckinForm preselectedBedId={preselectedBedId} />
     </div>
   )
 }

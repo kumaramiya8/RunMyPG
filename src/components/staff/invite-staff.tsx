@@ -106,7 +106,7 @@ export default function InviteStaff() {
             onClick={() => { setSaved(false); setName(''); setEmail(''); setPassword(''); setPhone(''); setRole(''); setPerms({}) }}
             className="flex-1 py-2.5 bg-primary text-white font-semibold rounded-xl text-sm hover:bg-primary-dark active:scale-[0.98] transition-all"
           >
-            Invite Another
+            Add Another
           </button>
           <Link
             href="/more/staff"

@@ -40,18 +40,43 @@ export async function getActiveOccupancies(orgId: string) {
   return data
 }
 
+// ── Pro-rata helper ───────────────────────────────────────────────────
+
+export function calculateProRataRent(monthlyRent: number, checkinDate: string): number {
+  const d = new Date(checkinDate)
+  const dayOfMonth = d.getDate()
+  if (dayOfMonth === 1) return monthlyRent
+  const daysInMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()
+  const daysRemaining = daysInMonth - dayOfMonth + 1
+  return Math.round((daysRemaining / daysInMonth) * monthlyRent)
+}
+
+// ── Check-in ─────────────────────────────────────────────────────────
+
 export async function checkIn(
   orgId: string,
   bedId: string,
   tenant: {
-    fullName: string; phone: string; email?: string;
+    fullName: string; phone: string; email?: string; gender?: string;
     fatherName?: string; fatherPhone?: string;
     motherName?: string; motherPhone?: string;
     aadhaarNumber?: string; occupation?: string; companyOrCollege?: string;
   },
-  rent: { monthlyRent: number; depositAmount: number; rentDueDay: number; checkinDate?: string }
+  rent: {
+    monthlyRent: number; depositAmount: number; rentDueDay: number;
+    checkinDate?: string; lockinMonths?: number;
+  }
 ) {
   const checkinDate = rent.checkinDate || new Date().toISOString()
+  const lockinMonths = rent.lockinMonths ?? 0
+
+  // Calculate lock-in end date
+  let lockinEndDate: string | null = null
+  if (lockinMonths > 0) {
+    const d = new Date(checkinDate)
+    d.setMonth(d.getMonth() + lockinMonths)
+    lockinEndDate = d.toISOString().split('T')[0]
+  }
 
   // 1. Create tenant
   const { data: newTenant, error: tErr } = await supabase
@@ -61,6 +86,7 @@ export async function checkIn(
       full_name: tenant.fullName,
       phone: tenant.phone,
       email: tenant.email,
+      gender: tenant.gender,
       father_name: tenant.fatherName,
       father_phone: tenant.fatherPhone,
       mother_name: tenant.motherName,
@@ -73,7 +99,7 @@ export async function checkIn(
     .single()
   if (tErr) throw tErr
 
-  // 2. Create occupancy
+  // 2. Create occupancy (with lock-in info)
   const { data: occupancy, error: oErr } = await supabase
     .from('occupancies')
     .insert({
@@ -83,6 +109,8 @@ export async function checkIn(
       monthly_rent: rent.monthlyRent,
       deposit_amount: rent.depositAmount,
       rent_due_day: rent.rentDueDay,
+      lockin_months: lockinMonths,
+      lockin_end_date: lockinEndDate,
     })
     .select()
     .single()
@@ -109,11 +137,14 @@ export async function checkIn(
       })
   }
 
-  // 5. Create first month's invoice (from checkin date)
+  // 5. Create first month's invoice (pro-rata if not 1st of month)
   const checkinD = new Date(checkinDate)
   const periodStart = checkinD.toISOString().split('T')[0]
   const periodEnd = new Date(checkinD.getFullYear(), checkinD.getMonth() + 1, 0).toISOString().split('T')[0]
   const dueDate = new Date(checkinD.getFullYear(), checkinD.getMonth(), rent.rentDueDay).toISOString().split('T')[0]
+
+  // Pro-rata: if checkin is not on the 1st, charge proportionally
+  const firstMonthRent = calculateProRataRent(rent.monthlyRent, checkinDate)
 
   // Get org GST settings
   const { data: org } = await supabase
@@ -122,8 +153,8 @@ export async function checkIn(
     .eq('id', orgId)
     .single()
 
-  const gstAmount = org?.gst_enabled ? Math.round(rent.monthlyRent * 0.18) : 0
-  const totalAmount = rent.monthlyRent + gstAmount
+  const gstAmount = org?.gst_enabled ? Math.round(firstMonthRent * 0.18) : 0
+  const totalAmount = firstMonthRent + gstAmount
 
   const { data: invoice } = await supabase
     .from('invoices')
@@ -133,7 +164,7 @@ export async function checkIn(
       invoice_number: `INV-${Date.now()}`,
       period_start: periodStart,
       period_end: periodEnd,
-      base_amount: rent.monthlyRent,
+      base_amount: firstMonthRent,
       gst_amount: gstAmount,
       total_amount: totalAmount,
       due_date: dueDate,
@@ -154,7 +185,9 @@ export async function checkIn(
         amount: totalAmount,
         payment_method: 'cash',
         payment_type: 'advance',
-        notes: 'First month advance rent collected at check-in',
+        notes: firstMonthRent < rent.monthlyRent
+          ? `First month pro-rata rent collected at check-in (${checkinD.getDate()}th onwards)`
+          : 'First month advance rent collected at check-in',
       })
   }
 
@@ -166,13 +199,52 @@ export async function checkIn(
       recipient_type: 'tenant',
       recipient_id: newTenant.id,
       message_type: 'announcement',
-      content: `Welcome! You have been checked in. Monthly rent: ₹${rent.monthlyRent.toLocaleString('en-IN')}. Deposit paid: ₹${rent.depositAmount.toLocaleString('en-IN')}.`,
+      content: `Welcome! You have been checked in. Monthly rent: ₹${rent.monthlyRent.toLocaleString('en-IN')}. Deposit paid: ₹${rent.depositAmount.toLocaleString('en-IN')}.${lockinMonths > 0 ? ` Lock-in: ${lockinMonths} months.` : ''}`,
       sent_at: new Date().toISOString(),
       delivery_status: 'delivered',
     })
 
   return newTenant
 }
+
+// ── Book Advance ─────────────────────────────────────────────────────
+
+export async function bookAdvance(
+  orgId: string,
+  bedId: string,
+  guestName: string,
+  guestPhone: string,
+  bookingFee: number,
+  expectedCheckin: string,
+  notes?: string
+) {
+  // 1. Insert into advance_bookings table
+  const { data, error } = await supabase
+    .from('advance_bookings')
+    .insert({
+      org_id: orgId,
+      bed_id: bedId,
+      guest_name: guestName,
+      guest_phone: guestPhone,
+      booking_fee: bookingFee,
+      expected_checkin: expectedCheckin,
+      notes: notes || null,
+    })
+    .select()
+    .single()
+  if (error) throw error
+
+  // 2. Update bed status to 'blocked'
+  const { error: bErr } = await supabase
+    .from('beds')
+    .update({ status: 'blocked' })
+    .eq('id', bedId)
+  if (bErr) throw bErr
+
+  return data
+}
+
+// ── Check-out ────────────────────────────────────────────────────────
 
 export async function checkOut(occupancyId: string, bedId: string, deductions: number) {
   const { error: oErr } = await supabase

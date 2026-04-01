@@ -1,10 +1,27 @@
 'use client'
 
+import { useEffect, useState } from 'react'
+import { Bell } from 'lucide-react'
+import Link from 'next/link'
 import { LogoIcon } from '../logo'
 import { useAuth } from '@/lib/auth-context'
+import { supabase } from '@/lib/supabase'
 
 export default function TenantHeader() {
-  const { orgName, staffName } = useAuth()
+  const { orgName, staffName, tenantId } = useAuth()
+  const [unreadCount, setUnreadCount] = useState(0)
+
+  useEffect(() => {
+    if (!tenantId) return
+    supabase
+      .from('notifications')
+      .select('id', { count: 'exact', head: true })
+      .eq('tenant_id', tenantId)
+      .eq('read', false)
+      .then(({ count }) => {
+        setUnreadCount(count || 0)
+      })
+  }, [tenantId])
 
   return (
     <header className="sticky top-0 z-40 bg-white/80 backdrop-blur-lg border-b border-slate-200/60 md:hidden">
@@ -17,12 +34,23 @@ export default function TenantHeader() {
           </div>
         </div>
 
-        {staffName && (
-          <div className="text-right">
-            <p className="text-xs font-semibold text-slate-700">{staffName}</p>
-            <p className="text-[10px] text-slate-400">Tenant</p>
-          </div>
-        )}
+        <div className="flex items-center gap-3">
+          <Link href="/tenant/notifications" className="relative p-2 rounded-full hover:bg-slate-100 active:bg-slate-200 transition-colors">
+            <Bell className="w-5 h-5 text-slate-600" />
+            {unreadCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center bg-red-500 text-white text-[10px] font-bold rounded-full px-1">
+                {unreadCount > 99 ? '99+' : unreadCount}
+              </span>
+            )}
+          </Link>
+
+          {staffName && (
+            <div className="text-right">
+              <p className="text-xs font-semibold text-slate-700">{staffName}</p>
+              <p className="text-[10px] text-slate-400">Tenant</p>
+            </div>
+          )}
+        </div>
       </div>
     </header>
   )

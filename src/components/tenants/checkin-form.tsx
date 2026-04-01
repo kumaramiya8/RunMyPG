@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import {
   User,
   Phone,
@@ -16,13 +16,14 @@ import {
   ChevronDown,
   Check,
   ArrowLeft,
+  Lock,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
 import { useQuery } from '@/lib/hooks/use-query'
 import { getFullPropertyTree } from '@/lib/services/property'
-import { checkIn } from '@/lib/services/tenants'
+import { checkIn, calculateProRataRent } from '@/lib/services/tenants'
 import { ListSkeleton, EmptyState } from '@/components/loading-skeleton'
 import type { Floor, Room, Bed } from '@/lib/types'
 
@@ -68,13 +69,13 @@ function FormInput({ label, icon: Icon, ...props }: { label: string; icon: typeo
 
 // ── Main Form ───────────────────────────────────────────────────────
 
-export default function CheckinForm() {
+export default function CheckinForm({ preselectedBedId }: { preselectedBedId?: string }) {
   const { orgId } = useAuth()
   const router = useRouter()
-  const [step, setStep] = useState(0)
+  const [step, setStep] = useState(preselectedBedId ? 1 : 0)
   const [selectedFloor, setSelectedFloor] = useState('')
   const [selectedRoom, setSelectedRoom] = useState('')
-  const [selectedBed, setSelectedBed] = useState('')
+  const [selectedBed, setSelectedBed] = useState(preselectedBedId || '')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -82,6 +83,7 @@ export default function CheckinForm() {
   const [fullName, setFullName] = useState('')
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
+  const [gender, setGender] = useState('')
   const [fatherName, setFatherName] = useState('')
   const [fatherPhone, setFatherPhone] = useState('')
   const [motherName, setMotherName] = useState('')
@@ -93,11 +95,32 @@ export default function CheckinForm() {
   const [depositAmount, setDepositAmount] = useState('')
   const [rentDueDay, setRentDueDay] = useState('1')
   const [checkinDate, setCheckinDate] = useState(new Date().toISOString().split('T')[0])
+  const [lockinMonths, setLockinMonths] = useState('0')
 
   const { data: property, loading } = useQuery(
     () => getFullPropertyTree(orgId!),
     [orgId]
   )
+
+  // Pro-rata calculation
+  const proRataInfo = useMemo(() => {
+    const rent = Number(monthlyRent)
+    if (!rent || !checkinDate) return null
+    const d = new Date(checkinDate)
+    const dayOfMonth = d.getDate()
+    if (dayOfMonth === 1) return null // No pro-rata needed
+    const proRata = calculateProRataRent(rent, checkinDate)
+    const daysInMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()
+    const daysRemaining = daysInMonth - dayOfMonth + 1
+    return { proRata, daysRemaining, daysInMonth, dayOfMonth }
+  }, [monthlyRent, checkinDate])
+
+  // Total to collect at check-in
+  const totalToCollect = useMemo(() => {
+    const deposit = Number(depositAmount) || 0
+    const firstMonth = proRataInfo ? proRataInfo.proRata : (Number(monthlyRent) || 0)
+    return deposit + firstMonth
+  }, [depositAmount, monthlyRent, proRataInfo])
 
   if (loading) {
     return <ListSkeleton rows={4} />
@@ -133,6 +156,9 @@ export default function CheckinForm() {
     : []
 
   const selectedRoomData = rooms.find((r) => r.id === selectedRoom)
+  // When preselectedBedId is used, find the room for display
+  const preselectedBedData = preselectedBedId ? beds.find((b) => b.id === preselectedBedId) : null
+  const preselectedRoomData = preselectedBedData ? rooms.find((r) => r.id === preselectedBedData.room_id) : null
 
   // Set default rent when room is selected
   const handleRoomSelect = (roomId: string) => {
@@ -157,6 +183,7 @@ export default function CheckinForm() {
           fullName,
           phone,
           email: email || undefined,
+          gender: gender || undefined,
           fatherName: fatherName || undefined,
           fatherPhone: fatherPhone || undefined,
           motherName: motherName || undefined,
@@ -169,6 +196,8 @@ export default function CheckinForm() {
           monthlyRent: Number(monthlyRent),
           depositAmount: Number(depositAmount),
           rentDueDay: Number(rentDueDay),
+          checkinDate,
+          lockinMonths: Number(lockinMonths),
         }
       )
       router.push('/tenants')
@@ -297,6 +326,26 @@ export default function CheckinForm() {
           <FormInput label="Phone Number" icon={Phone} placeholder="+91 XXXXX XXXXX" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />
           <FormInput label="Email (Optional)" icon={Mail} placeholder="email@example.com" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
 
+          {/* Gender selector */}
+          <div>
+            <label className="text-xs font-semibold text-slate-600 mb-1 block">Gender</label>
+            <div className="flex gap-2">
+              {['Male', 'Female', 'Other'].map((g) => (
+                <button
+                  key={g}
+                  onClick={() => setGender(g)}
+                  className={`flex-1 py-2 rounded-xl border text-sm font-medium transition-all ${
+                    gender === g
+                      ? 'border-primary bg-primary/5 text-primary'
+                      : 'border-slate-200 text-slate-600 hover:border-primary hover:text-primary'
+                  }`}
+                >
+                  {g}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div>
             <label className="text-xs font-semibold text-slate-600 mb-1 block">Emergency Contact - Father</label>
             <div className="grid grid-cols-2 gap-2">
@@ -326,15 +375,17 @@ export default function CheckinForm() {
           </div>
 
           <div className="flex gap-2 mt-2">
-            <button
-              onClick={() => setStep(0)}
-              className="flex-1 py-3 bg-slate-100 text-slate-700 font-semibold rounded-xl text-sm hover:bg-slate-200 active:scale-[0.98] transition-all"
-            >
-              Back
-            </button>
+            {!preselectedBedId && (
+              <button
+                onClick={() => setStep(0)}
+                className="flex-1 py-3 bg-slate-100 text-slate-700 font-semibold rounded-xl text-sm hover:bg-slate-200 active:scale-[0.98] transition-all"
+              >
+                Back
+              </button>
+            )}
             <button
               onClick={() => setStep(2)}
-              className="flex-[2] py-3 bg-primary text-white font-semibold rounded-xl text-sm hover:bg-primary-dark active:scale-[0.98] transition-all"
+              className={`${preselectedBedId ? 'w-full' : 'flex-[2]'} py-3 bg-primary text-white font-semibold rounded-xl text-sm hover:bg-primary-dark active:scale-[0.98] transition-all`}
             >
               Continue
             </button>
@@ -407,7 +458,7 @@ export default function CheckinForm() {
           <div className="bg-slate-50 rounded-xl p-3 mb-2">
             <p className="text-xs font-semibold text-slate-500 mb-1">Selected Bed</p>
             <p className="text-sm font-bold text-slate-800">
-              {selectedRoomData?.name} &mdash; {availableBeds.find((b) => b.id === selectedBed)?.bed_number}
+              {(preselectedRoomData || selectedRoomData)?.name} &mdash; {(preselectedBedData || availableBeds.find((b) => b.id === selectedBed))?.bed_number}
             </p>
           </div>
 
@@ -466,6 +517,53 @@ export default function CheckinForm() {
               />
             </div>
           </div>
+
+          {/* Lock-in Period */}
+          <div>
+            <label className="text-xs font-semibold text-slate-600 mb-1 block">Lock-in Period</label>
+            <div className="relative">
+              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <select
+                value={lockinMonths}
+                onChange={(e) => setLockinMonths(e.target.value)}
+                className="w-full pl-10 pr-3 py-2.5 rounded-xl border border-slate-200 text-sm appearance-none bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+              >
+                <option value="0">No lock-in</option>
+                <option value="3">3 months</option>
+                <option value="6">6 months</option>
+                <option value="11">11 months</option>
+              </select>
+              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+            </div>
+          </div>
+
+          {/* Pro-rata + total summary */}
+          {Number(monthlyRent) > 0 && (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 space-y-1.5">
+              <p className="text-xs font-semibold text-emerald-700 mb-2">Collection Summary</p>
+              {proRataInfo ? (
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-slate-600">
+                    First month (pro-rata, {proRataInfo.daysRemaining}/{proRataInfo.daysInMonth} days)
+                  </span>
+                  <span className="text-xs font-bold text-slate-800">₹{proRataInfo.proRata.toLocaleString('en-IN')}</span>
+                </div>
+              ) : (
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-slate-600">First month rent</span>
+                  <span className="text-xs font-bold text-slate-800">₹{Number(monthlyRent).toLocaleString('en-IN')}</span>
+                </div>
+              )}
+              <div className="flex justify-between items-center">
+                <span className="text-xs text-slate-600">Deposit</span>
+                <span className="text-xs font-bold text-slate-800">₹{(Number(depositAmount) || 0).toLocaleString('en-IN')}</span>
+              </div>
+              <div className="border-t border-emerald-200 pt-1.5 mt-1.5 flex justify-between items-center">
+                <span className="text-xs font-bold text-emerald-700">Total to collect</span>
+                <span className="text-sm font-bold text-emerald-700">₹{totalToCollect.toLocaleString('en-IN')}</span>
+              </div>
+            </div>
+          )}
 
           <div className="flex gap-2 mt-2">
             <button

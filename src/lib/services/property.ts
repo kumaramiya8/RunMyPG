@@ -159,3 +159,90 @@ export async function deleteBuilding(buildingId: string) {
     .eq('id', buildingId)
   if (error) throw error
 }
+
+// ── Edit / Update functions ──────────────────────────────────────────
+
+export async function updateRoom(
+  roomId: string,
+  updates: {
+    name?: string
+    room_number?: string
+    has_ac?: boolean
+    has_attached_bathroom?: boolean
+    has_balcony?: boolean
+    has_tv?: boolean
+    base_rent?: number
+    room_type?: string
+  }
+) {
+  const { data, error } = await supabase
+    .from('rooms')
+    .update(updates)
+    .eq('id', roomId)
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function updateFloor(
+  floorId: string,
+  updates: { name?: string; floor_number?: number }
+) {
+  const { data, error } = await supabase
+    .from('floors')
+    .update(updates)
+    .eq('id', floorId)
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function updateBuilding(
+  buildingId: string,
+  updates: { name?: string; address?: string; city?: string }
+) {
+  const { data, error } = await supabase
+    .from('buildings')
+    .update(updates)
+    .eq('id', buildingId)
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function addBedToRoom(roomId: string, bedNumber: string, monthlyRent?: number) {
+  const { data, error } = await supabase
+    .from('beds')
+    .insert({
+      room_id: roomId,
+      bed_number: bedNumber,
+      status: 'vacant',
+      monthly_rent: monthlyRent,
+    })
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function removeBed(bedId: string) {
+  // First check the bed is vacant
+  const { data: bed, error: fetchErr } = await supabase
+    .from('beds')
+    .select('status')
+    .eq('id', bedId)
+    .single()
+  if (fetchErr) throw fetchErr
+  if (bed.status !== 'vacant') {
+    throw new Error('Cannot remove an occupied bed. The bed must be vacant first.')
+  }
+
+  const { error } = await supabase
+    .from('beds')
+    .delete()
+    .eq('id', bedId)
+  if (error) throw error
+}

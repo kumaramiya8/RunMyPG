@@ -16,11 +16,14 @@ import {
   Sun,
   Tv,
   Building2,
+  Phone,
+  FileText,
 } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
 import { useQuery } from '@/lib/hooks/use-query'
 import { getFullPropertyTree } from '@/lib/services/property'
-import { getActiveOccupancies } from '@/lib/services/tenants'
+import { getActiveOccupancies, bookAdvance } from '@/lib/services/tenants'
 import { ListSkeleton, EmptyState } from '@/components/loading-skeleton'
 import type { Bed as BedType, BedStatus, Floor, Room, Occupancy, Tenant } from '@/lib/types'
 
@@ -30,7 +33,7 @@ const statusConfig: Record<BedStatus, { bg: string; label: string; dotColor: str
   occupied: { bg: 'bg-red-100 border-red-200', label: 'Occupied', dotColor: 'bg-red-400' },
   vacant: { bg: 'bg-emerald-100 border-emerald-200', label: 'Vacant', dotColor: 'bg-emerald-400' },
   notice: { bg: 'bg-amber-100 border-amber-200', label: 'Notice', dotColor: 'bg-amber-400' },
-  blocked: { bg: 'bg-slate-200 border-slate-300', label: 'Blocked', dotColor: 'bg-slate-400' },
+  blocked: { bg: 'bg-yellow-100 border-yellow-300', label: 'Blocked', dotColor: 'bg-yellow-400' },
   maintenance: { bg: 'bg-orange-100 border-orange-200', label: 'Maintenance', dotColor: 'bg-orange-400' },
 }
 
@@ -41,6 +44,161 @@ interface OccupancyWithJoins extends Occupancy {
   bed: BedType & { room: Room }
 }
 
+// ── Book Advance Modal ──────────────────────────────────────────────
+
+function BookAdvanceModal({
+  bed,
+  rooms,
+  orgId,
+  onClose,
+  onBooked,
+}: {
+  bed: BedType
+  rooms: Room[]
+  orgId: string
+  onClose: () => void
+  onBooked: () => void
+}) {
+  const room = rooms.find((r) => r.id === bed.room_id)
+  const [guestName, setGuestName] = useState('')
+  const [guestPhone, setGuestPhone] = useState('')
+  const [bookingFee, setBookingFee] = useState('1000')
+  const [expectedCheckin, setExpectedCheckin] = useState('')
+  const [notes, setNotes] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleSubmit = async () => {
+    if (!guestName || !guestPhone || !expectedCheckin) {
+      setError('Please fill in guest name, phone, and expected check-in date.')
+      return
+    }
+    setSubmitting(true)
+    setError(null)
+    try {
+      await bookAdvance(orgId, bed.id, guestName, guestPhone, Number(bookingFee), expectedCheckin, notes || undefined)
+      onBooked()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Booking failed. Please try again.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40" onClick={onClose}>
+      <div
+        className="bg-white w-full md:max-w-md md:rounded-2xl rounded-t-2xl max-h-[80vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="sticky top-0 bg-white border-b border-slate-100 p-4 flex items-center justify-between rounded-t-2xl">
+          <div>
+            <h3 className="text-base font-bold text-slate-900">Book Advance</h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {room?.name} &mdash; {bed.bed_number}
+            </p>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-full hover:bg-slate-100">
+            <X className="w-5 h-5 text-slate-400" />
+          </button>
+        </div>
+
+        <div className="p-4 space-y-3">
+          {error && (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-3">
+              <p className="text-xs font-medium text-red-700">{error}</p>
+            </div>
+          )}
+
+          <div>
+            <label className="text-xs font-semibold text-slate-600 mb-1 block">Guest Name</label>
+            <div className="relative">
+              <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input
+                placeholder="Enter guest name"
+                value={guestName}
+                onChange={(e) => setGuestName(e.target.value)}
+                className="w-full pl-10 pr-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold text-slate-600 mb-1 block">Guest Phone</label>
+            <div className="relative">
+              <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input
+                placeholder="+91 XXXXX XXXXX"
+                type="tel"
+                value={guestPhone}
+                onChange={(e) => setGuestPhone(e.target.value)}
+                className="w-full pl-10 pr-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold text-slate-600 mb-1 block">Booking Fee</label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">₹</span>
+              <input
+                type="number"
+                value={bookingFee}
+                onChange={(e) => setBookingFee(e.target.value)}
+                className="w-full pl-7 pr-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold text-slate-600 mb-1 block">Expected Check-in Date</label>
+            <div className="relative">
+              <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input
+                type="date"
+                value={expectedCheckin}
+                onChange={(e) => setExpectedCheckin(e.target.value)}
+                className="w-full pl-10 pr-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold text-slate-600 mb-1 block">Notes (Optional)</label>
+            <div className="relative">
+              <FileText className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+              <textarea
+                placeholder="Any additional notes..."
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows={2}
+                className="w-full pl-10 pr-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary resize-none"
+              />
+            </div>
+          </div>
+
+          <div className="flex gap-2 mt-2">
+            <button
+              onClick={onClose}
+              className="flex-1 py-3 bg-slate-100 text-slate-700 font-semibold rounded-xl text-sm hover:bg-slate-200 active:scale-[0.98] transition-all"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSubmit}
+              disabled={submitting}
+              className="flex-[2] py-3 bg-primary text-white font-semibold rounded-xl text-sm hover:bg-primary-dark active:scale-[0.98] transition-all disabled:opacity-60"
+            >
+              {submitting ? 'Booking...' : 'Confirm Booking'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Bed Detail Sheet ────────────────────────────────────────────────
 
 function BedDetailSheet({
@@ -48,12 +206,15 @@ function BedDetailSheet({
   rooms,
   occupancies,
   onClose,
+  onBookAdvance,
 }: {
   bed: BedType
   rooms: Room[]
   occupancies: OccupancyWithJoins[]
   onClose: () => void
+  onBookAdvance: () => void
 }) {
+  const router = useRouter()
   const occupancy = occupancies.find((o) => o.bed_id === bed.id)
   const tenant = occupancy?.tenant
   const room = rooms.find((r) => r.id === bed.room_id)
@@ -180,10 +341,22 @@ function BedDetailSheet({
               <p className="text-sm font-medium text-slate-700">Bed is available</p>
               <p className="text-xs text-slate-400 mt-1">Ready for new check-in or advance booking</p>
               <div className="flex gap-2 mt-4">
-                <button className="flex-1 py-2.5 bg-primary text-white font-semibold rounded-xl text-sm hover:bg-primary-dark active:scale-[0.98] transition-all">
+                <button
+                  onClick={() => {
+                    onClose()
+                    router.push(`/tenants/checkin?bed=${bed.id}`)
+                  }}
+                  className="flex-1 py-2.5 bg-primary text-white font-semibold rounded-xl text-sm hover:bg-primary-dark active:scale-[0.98] transition-all"
+                >
                   Check In
                 </button>
-                <button className="flex-1 py-2.5 bg-slate-100 text-slate-700 font-semibold rounded-xl text-sm hover:bg-slate-200 active:scale-[0.98] transition-all">
+                <button
+                  onClick={() => {
+                    onClose()
+                    onBookAdvance()
+                  }}
+                  className="flex-1 py-2.5 bg-slate-100 text-slate-700 font-semibold rounded-xl text-sm hover:bg-slate-200 active:scale-[0.98] transition-all"
+                >
                   Book Advance
                 </button>
               </div>
@@ -210,14 +383,15 @@ function ordinal(n: number): string {
 export default function BedMap() {
   const { orgId } = useAuth()
   const [selectedBed, setSelectedBed] = useState<BedType | null>(null)
+  const [bookAdvanceBed, setBookAdvanceBed] = useState<BedType | null>(null)
   const [filterStatus, setFilterStatus] = useState<BedStatus | 'all'>('all')
 
-  const { data: property, loading: propertyLoading } = useQuery(
+  const { data: property, loading: propertyLoading, refetch: refetchProperty } = useQuery(
     () => getFullPropertyTree(orgId!),
     [orgId]
   )
 
-  const { data: occupancies, loading: occupanciesLoading } = useQuery(
+  const { data: occupancies, loading: occupanciesLoading, refetch: refetchOccupancies } = useQuery(
     () => getActiveOccupancies(orgId!),
     [orgId]
   )
@@ -263,6 +437,12 @@ export default function BedMap() {
     return occ?.tenant ?? null
   }
 
+  const handleBooked = () => {
+    setBookAdvanceBed(null)
+    refetchProperty()
+    refetchOccupancies()
+  }
+
   return (
     <>
       {/* Stats bar */}
@@ -272,7 +452,7 @@ export default function BedMap() {
           { key: 'occupied' as const, label: 'Occupied', count: stats.occupied, color: 'bg-red-50 text-red-600' },
           { key: 'vacant' as const, label: 'Vacant', count: stats.vacant, color: 'bg-emerald-50 text-emerald-600' },
           { key: 'notice' as const, label: 'Notice', count: stats.notice, color: 'bg-amber-50 text-amber-600' },
-          { key: 'blocked' as const, label: 'Blocked', count: stats.blocked, color: 'bg-slate-100 text-slate-500' },
+          { key: 'blocked' as const, label: 'Blocked', count: stats.blocked, color: 'bg-yellow-50 text-yellow-600' },
         ].map((item) => (
           <button
             key={item.key}
@@ -371,6 +551,22 @@ export default function BedMap() {
           rooms={rooms}
           occupancies={activeOccupancies}
           onClose={() => setSelectedBed(null)}
+          onBookAdvance={() => {
+            const bed = selectedBed
+            setSelectedBed(null)
+            setBookAdvanceBed(bed)
+          }}
+        />
+      )}
+
+      {/* Book Advance Modal */}
+      {bookAdvanceBed && orgId && (
+        <BookAdvanceModal
+          bed={bookAdvanceBed}
+          rooms={rooms}
+          orgId={orgId}
+          onClose={() => setBookAdvanceBed(null)}
+          onBooked={handleBooked}
         />
       )}
     </>

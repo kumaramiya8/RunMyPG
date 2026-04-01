@@ -54,6 +54,7 @@ export interface Tenant {
   full_name: string
   phone: string
   email?: string
+  gender?: string
   photo_url?: string
   aadhaar_number?: string
   aadhaar_verified: boolean
@@ -78,9 +79,23 @@ export interface Occupancy {
   deposit_amount: number
   monthly_rent: number
   rent_due_day: number
+  lockin_months?: number
+  lockin_end_date?: string
   notice_date?: string
   expected_vacate_date?: string
   status: OccupancyStatus
+}
+
+export interface AdvanceBooking {
+  id: string
+  org_id: string
+  bed_id: string
+  guest_name: string
+  guest_phone: string
+  booking_fee: number
+  expected_checkin: string
+  notes?: string
+  created_at: string
 }
 
 export type InvoiceStatus = 'pending' | 'paid' | 'partially_paid' | 'overdue'

@@ -19,7 +19,7 @@ export default function InviteStaffPage() {
             <UserPlus className="w-5 h-5 text-primary" />
           </div>
           <div>
-            <h1 className="text-lg font-bold text-slate-900">Invite Staff</h1>
+            <h1 className="text-lg font-bold text-slate-900">Add Staff</h1>
             <p className="text-xs text-slate-500">Add a team member</p>
           </div>
         </div>
