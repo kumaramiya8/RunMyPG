@@ -1,10 +1,13 @@
 'use client'
 
-import { IndianRupee, Wrench, UtensilsCrossed, Bell, BedDouble, CalendarDays, CheckCircle2 } from 'lucide-react'
+import { useState } from 'react'
+import { IndianRupee, Wrench, UtensilsCrossed, Bell, BedDouble, CalendarDays, CheckCircle2, Lock, Shield, LogOut, AlertTriangle } from 'lucide-react'
 import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
 import { useQuery } from '@/lib/hooks/use-query'
 import { supabase } from '@/lib/supabase'
+import { putOnNotice } from '@/lib/services/tenants'
+import { createNotification, notifyNoticePeriod } from '@/lib/services/notifications'
 
 function formatINR(amount: number): string {
   return new Intl.NumberFormat('en-IN', {
@@ -26,8 +29,14 @@ interface Occupancy {
   id: string
   monthly_rent: number
   deposit_amount: number
+  deposit_paid: number
   start_date: string
   status: string
+  lockin_months: number
+  lockin_end_date: string | null
+  notice_date: string | null
+  expected_vacate_date: string | null
+  bed_id: string
   bed: {
     bed_label: string
     room: {
@@ -46,9 +55,11 @@ interface Payment {
 }
 
 export default function TenantDashboardPage() {
-  const { tenantId, staffName } = useAuth()
+  const { tenantId, orgId, staffName } = useAuth()
+  const [showNoticeConfirm, setShowNoticeConfirm] = useState(false)
+  const [noticeLoading, setNoticeLoading] = useState(false)
 
-  const { data: occupancy, loading: loadingOccupancy } = useQuery<Occupancy | null>(
+  const { data: occupancy, loading: loadingOccupancy, refetch: refetchOccupancy } = useQuery<Occupancy | null>(
     async () => {
       if (!tenantId) return null
       const { data, error } = await supabase
@@ -61,6 +72,20 @@ export default function TenantDashboardPage() {
       return data
     },
     [tenantId]
+  )
+
+  const { data: orgSettings } = useQuery(
+    async () => {
+      if (!orgId) return null
+      const { data, error } = await supabase
+        .from('organizations')
+        .select('notice_period_days')
+        .eq('id', orgId)
+        .single()
+      if (error) return null
+      return data
+    },
+    [orgId]
   )
 
   const { data: payments, loading: loadingPayments } = useQuery<Payment[]>(
@@ -80,6 +105,41 @@ export default function TenantDashboardPage() {
 
   const loading = loadingOccupancy || loadingPayments
   const firstName = staffName ? staffName.split(' ')[0] : 'Tenant'
+
+  // Notice period logic
+  const noticePeriodDays = orgSettings?.notice_period_days ?? 30
+
+  const handleInitiateNotice = async () => {
+    if (!occupancy?.id || !orgId || !tenantId) return
+    setNoticeLoading(true)
+    try {
+      const today = new Date()
+      const vacateDate = new Date(today)
+      vacateDate.setDate(vacateDate.getDate() + noticePeriodDays)
+      const noticeDateStr = today.toISOString().split('T')[0]
+      const vacateDateStr = vacateDate.toISOString().split('T')[0]
+
+      await putOnNotice(occupancy.id, noticeDateStr, vacateDateStr)
+      await notifyNoticePeriod(orgId, tenantId, formatDate(vacateDateStr))
+
+      // Notify org/staff about the notice
+      await createNotification(
+        orgId,
+        'staff',
+        null,
+        'Tenant Initiated Notice',
+        `${staffName || 'A tenant'} has initiated notice. Expected vacate date: ${formatDate(vacateDateStr)}.`,
+        'notice'
+      )
+
+      setShowNoticeConfirm(false)
+      refetchOccupancy()
+    } catch (err) {
+      console.error('Failed to initiate notice:', err)
+    } finally {
+      setNoticeLoading(false)
+    }
+  }
 
   if (loading) {
     return (
@@ -102,6 +162,34 @@ export default function TenantDashboardPage() {
   const nextDue = new Date(today.getFullYear(), today.getMonth() + 1, 1)
   const nextDueStr = nextDue.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
   const daysUntilDue = Math.ceil((nextDue.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+
+  // Lock-in calculations
+  const lockinMonths = occupancy?.lockin_months ?? 0
+  const lockinEndDate = occupancy?.lockin_end_date ? new Date(occupancy.lockin_end_date) : null
+  const lockinActive = lockinEndDate ? today < lockinEndDate : false
+  const lockinDaysRemaining = lockinEndDate
+    ? Math.max(0, Math.ceil((lockinEndDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)))
+    : 0
+
+  // Deposit calculations
+  const depositRequired = occupancy?.deposit_amount ?? 0
+  const depositPaid = occupancy?.deposit_paid ?? 0
+  const depositBalance = Math.max(0, depositRequired - depositPaid)
+
+  // Notice eligibility: active status and lock-in ended (or no lock-in)
+  const isActive = occupancy?.status === 'active'
+  const isOnNotice = occupancy?.status === 'notice_period'
+  const canInitiateNotice = isActive && !lockinActive
+
+  // Vacate date for notice confirmation dialog
+  const expectedVacateDate = new Date(today)
+  expectedVacateDate.setDate(expectedVacateDate.getDate() + noticePeriodDays)
+  const expectedVacateDateStr = formatDate(expectedVacateDate.toISOString().split('T')[0])
+
+  // Notice period remaining
+  const noticeDaysRemaining = occupancy?.expected_vacate_date
+    ? Math.max(0, Math.ceil((new Date(occupancy.expected_vacate_date).getTime() - today.getTime()) / (1000 * 60 * 60 * 24)))
+    : 0
 
   return (
     <div className="px-4 py-4 pb-24 space-y-4">
@@ -179,6 +267,184 @@ export default function TenantDashboardPage() {
               <span className="text-sm font-bold text-emerald-600">
                 {formatINR(occupancy.deposit_amount || 0)}
               </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Lock-in Info Card */}
+      {occupancy && lockinMonths > 0 && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-4">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center">
+              <Lock className="w-5 h-5 text-amber-600" />
+            </div>
+            <div>
+              <h2 className="text-sm font-semibold text-slate-900">Lock-in Period</h2>
+              <p className="text-xs text-slate-500">Minimum stay commitment</p>
+            </div>
+          </div>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between py-2 border-b border-slate-100">
+              <span className="text-sm text-slate-500">Duration</span>
+              <span className="text-sm font-bold text-slate-900">{lockinMonths} months</span>
+            </div>
+            {lockinEndDate && (
+              <div className="flex items-center justify-between py-2 border-b border-slate-100">
+                <span className="text-sm text-slate-500">End Date</span>
+                <span className="text-sm font-bold text-slate-900">
+                  {formatDate(occupancy.lockin_end_date!)}
+                </span>
+              </div>
+            )}
+            <div className="flex items-center justify-between py-2">
+              <span className="text-sm text-slate-500">Status</span>
+              {lockinActive ? (
+                <div className="text-right">
+                  <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">
+                    Active
+                  </span>
+                  <p className="text-[10px] text-slate-400 mt-0.5">{lockinDaysRemaining} days remaining</p>
+                </div>
+              ) : (
+                <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">
+                  Completed
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Deposit Card */}
+      {occupancy && depositRequired > 0 && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-4">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="w-10 h-10 rounded-xl bg-purple-50 flex items-center justify-center">
+              <Shield className="w-5 h-5 text-purple-600" />
+            </div>
+            <div>
+              <h2 className="text-sm font-semibold text-slate-900">Security Deposit</h2>
+              <p className="text-xs text-slate-500">Deposit tracking</p>
+            </div>
+          </div>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between py-2 border-b border-slate-100">
+              <span className="text-sm text-slate-500">Required</span>
+              <span className="text-sm font-bold text-slate-900">{formatINR(depositRequired)}</span>
+            </div>
+            <div className="flex items-center justify-between py-2 border-b border-slate-100">
+              <span className="text-sm text-slate-500">Paid</span>
+              <span className="text-sm font-bold text-emerald-600">{formatINR(depositPaid)}</span>
+            </div>
+            {depositBalance > 0 && (
+              <div className="flex items-center justify-between py-2">
+                <span className="text-sm text-slate-500">Balance Due</span>
+                <span className="text-sm font-bold text-red-600">{formatINR(depositBalance)}</span>
+              </div>
+            )}
+            {depositBalance === 0 && (
+              <div className="flex items-center justify-center py-2">
+                <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Fully Paid
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Notice Section */}
+      {occupancy && isOnNotice && (
+        <div className="bg-gradient-to-br from-orange-50 to-red-50 border border-orange-200 rounded-2xl p-4">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="w-10 h-10 rounded-xl bg-orange-100 flex items-center justify-center">
+              <LogOut className="w-5 h-5 text-orange-600" />
+            </div>
+            <div>
+              <h2 className="text-sm font-semibold text-slate-900">Notice Period</h2>
+              <p className="text-xs text-orange-600 font-medium">You are on notice</p>
+            </div>
+          </div>
+          <div className="space-y-3">
+            {occupancy.notice_date && (
+              <div className="flex items-center justify-between py-2 border-b border-orange-100">
+                <span className="text-sm text-slate-500">Notice Date</span>
+                <span className="text-sm font-bold text-slate-900">{formatDate(occupancy.notice_date)}</span>
+              </div>
+            )}
+            {occupancy.expected_vacate_date && (
+              <div className="flex items-center justify-between py-2 border-b border-orange-100">
+                <span className="text-sm text-slate-500">Expected Vacate</span>
+                <span className="text-sm font-bold text-slate-900">{formatDate(occupancy.expected_vacate_date)}</span>
+              </div>
+            )}
+            <div className="flex items-center justify-between py-2">
+              <span className="text-sm text-slate-500">Days Remaining</span>
+              <span className={`text-sm font-bold ${noticeDaysRemaining <= 7 ? 'text-red-600' : 'text-orange-600'}`}>
+                {noticeDaysRemaining} days
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {occupancy && canInitiateNotice && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-4">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center">
+              <LogOut className="w-5 h-5 text-slate-600" />
+            </div>
+            <div>
+              <h2 className="text-sm font-semibold text-slate-900">Move Out</h2>
+              <p className="text-xs text-slate-500">Initiate your notice period</p>
+            </div>
+          </div>
+          <p className="text-xs text-slate-500 mb-3">
+            You can initiate a {noticePeriodDays}-day notice period to vacate your accommodation.
+          </p>
+          <button
+            onClick={() => setShowNoticeConfirm(true)}
+            className="w-full py-2.5 px-4 bg-red-50 hover:bg-red-100 active:bg-red-200 text-red-700 text-sm font-semibold rounded-xl transition-colors border border-red-200"
+          >
+            Initiate Notice
+          </button>
+        </div>
+      )}
+
+      {/* Notice Confirmation Dialog */}
+      {showNoticeConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
+          <div className="bg-white rounded-2xl p-5 max-w-sm w-full shadow-xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center">
+                <AlertTriangle className="w-5 h-5 text-amber-600" />
+              </div>
+              <h3 className="text-base font-bold text-slate-900">Confirm Notice</h3>
+            </div>
+            <p className="text-sm text-slate-600 mb-4">
+              Are you sure you want to initiate notice? You will need to vacate by{' '}
+              <span className="font-semibold text-slate-900">{expectedVacateDateStr}</span>.
+            </p>
+            <p className="text-xs text-slate-400 mb-5">
+              This action cannot be undone. A {noticePeriodDays}-day notice period will begin from today.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowNoticeConfirm(false)}
+                disabled={noticeLoading}
+                className="flex-1 py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleInitiateNotice}
+                disabled={noticeLoading}
+                className="flex-1 py-2.5 px-4 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-xl transition-colors disabled:opacity-50"
+              >
+                {noticeLoading ? 'Processing...' : 'Confirm'}
+              </button>
             </div>
           </div>
         </div>

@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect } from 'react'
 import { BedDouble, Users, IndianRupee, Wrench, TrendingUp, ArrowUpRight } from 'lucide-react'
 import StatCard from '@/components/dashboard/stat-card'
 import OccupancyBar from '@/components/dashboard/occupancy-bar'
@@ -11,6 +12,7 @@ import { useAuth } from '@/lib/auth-context'
 import { useQuery } from '@/lib/hooks/use-query'
 import { getFullPropertyTree } from '@/lib/services/property'
 import { getFinancialSummary } from '@/lib/services/billing'
+import { supabase } from '@/lib/supabase'
 import { getComplaints } from '@/lib/services/complaints'
 import { getActiveOccupancies } from '@/lib/services/tenants'
 
@@ -48,6 +50,13 @@ export default function DashboardPage() {
   )
 
   const loading = loadingProperty || loadingFinancials || loadingComplaints || loadingOccupancies
+
+  // Auto-generate monthly invoices for all active tenants
+  useEffect(() => {
+    if (orgId && !loading) {
+      supabase.rpc('generate_monthly_invoices', { p_org_id: orgId }).then(() => {}, () => {})
+    }
+  }, [orgId, loading])
 
   if (loading) {
     return <PageSkeleton />

@@ -12,6 +12,7 @@ import {
   Building2,
   Receipt,
   TrendingUp,
+  Calendar,
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { useQuery } from '@/lib/hooks/use-query'
@@ -170,6 +171,13 @@ export default function BillsOverview() {
         >
           <TrendingUp className="w-3.5 h-3.5" />
           Monthly Report
+        </Link>
+        <Link
+          href="/bills/calendar"
+          className="shrink-0 flex items-center gap-2 px-4 py-2.5 bg-white text-slate-700 font-semibold rounded-xl text-xs border border-slate-200 hover:bg-slate-50 active:scale-[0.98] transition-all"
+        >
+          <Calendar className="w-3.5 h-3.5" />
+          Payment Calendar
         </Link>
       </div>
 
