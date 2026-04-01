@@ -18,6 +18,7 @@ import { useQuery, useMutation } from '@/lib/hooks/use-query'
 import { getActiveOccupancies } from '@/lib/services/tenants'
 import { getFullPropertyTree } from '@/lib/services/property'
 import { sendBroadcast } from '@/lib/services/messages'
+import { broadcastNotification } from '@/lib/services/notifications'
 import { ListSkeleton } from '@/components/loading-skeleton'
 
 type RecipientScope = 'all' | 'floor' | 'individual'
@@ -75,6 +76,11 @@ export default function BroadcastComposer() {
     const recipientId = scope === 'individual' ? selectedTenant : scope === 'floor' ? selectedFloor : null
     const result = await sendMut.mutate(orgId, scope, recipientId, 'announcement', message)
     if (result) {
+      try {
+        await broadcastNotification(orgId, 'Announcement', message)
+      } catch {
+        // notification is best-effort; don't block the send flow
+      }
       setSent(true)
     }
   }

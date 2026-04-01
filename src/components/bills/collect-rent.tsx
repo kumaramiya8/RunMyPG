@@ -10,6 +10,7 @@ import { useAuth } from '@/lib/auth-context'
 import { useQuery, useMutation } from '@/lib/hooks/use-query'
 import { getInvoices, recordPayment, recordDepositPayment, recordAdvanceRent, getPaymentsForOccupancy } from '@/lib/services/billing'
 import { getActiveOccupancies } from '@/lib/services/tenants'
+import { notifyPaymentReceived } from '@/lib/services/notifications'
 import { ListSkeleton } from '@/components/loading-skeleton'
 import Link from 'next/link'
 
@@ -97,6 +98,12 @@ export default function CollectRent() {
       setLastPaymentId(payment?.id || null)
       setConfirmed(true)
       refetchInvoices()
+      try {
+        const tenantId = selectedInv.tenant?.id
+        if (tenantId) {
+          await notifyPaymentReceived(orgId, tenantId, amount, 'rent', `/bills/receipt/${payment?.id}`)
+        }
+      } catch { /* best-effort */ }
     } catch (err: any) {
       setError(err.message || 'Payment failed')
     } finally { setPaying(false) }
@@ -110,6 +117,12 @@ export default function CollectRent() {
       const depositPayment = await recordDepositPayment(orgId, selectedTenant.occupancy.id, Number(customAmount), paymentMethod, transactionRef || undefined)
       setLastPaymentId(depositPayment?.id || null)
       setConfirmed(true)
+      try {
+        const tenantId = selectedTenant.tenant?.id
+        if (tenantId) {
+          await notifyPaymentReceived(orgId, tenantId, Number(customAmount), 'deposit', `/bills/receipt/${depositPayment?.id}`)
+        }
+      } catch { /* best-effort */ }
     } catch (err: any) {
       setError(err.message || 'Payment failed')
     } finally { setPaying(false) }
@@ -124,6 +137,12 @@ export default function CollectRent() {
       const advancePayment = await recordAdvanceRent(orgId, selectedTenant.occupancy.id, amount, advanceMonths, paymentMethod, transactionRef || undefined)
       setLastPaymentId(advancePayment?.id || null)
       setConfirmed(true)
+      try {
+        const tenantId = selectedTenant.tenant?.id
+        if (tenantId) {
+          await notifyPaymentReceived(orgId, tenantId, amount, 'advance', `/bills/receipt/${advancePayment?.id}`)
+        }
+      } catch { /* best-effort */ }
     } catch (err: any) {
       setError(err.message || 'Payment failed')
     } finally { setPaying(false) }

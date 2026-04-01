@@ -1,6 +1,7 @@
 'use client'
 
-import { ArrowLeft, FileBarChart, Download } from 'lucide-react'
+import { useState } from 'react'
+import { ArrowLeft, FileBarChart, Download, ChevronDown, ChevronUp } from 'lucide-react'
 import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
 import { useQuery } from '@/lib/hooks/use-query'
@@ -36,8 +37,49 @@ function downloadCSV(filename: string, headers: string[], rows: string[][]) {
   URL.revokeObjectURL(url)
 }
 
+// ─── Reusable data table component ───────────────────────────────────
+function DataTable({ headers, rows }: { headers: string[]; rows: React.ReactNode[][] }) {
+  if (rows.length === 0) {
+    return <p className="text-xs text-slate-400 py-4 text-center">No data available</p>
+  }
+  return (
+    <div className="overflow-x-auto rounded-lg border border-slate-200 mt-3">
+      <table className="min-w-full divide-y divide-slate-200">
+        <thead>
+          <tr className="bg-slate-50">
+            {headers.map((h, i) => (
+              <th
+                key={i}
+                className="px-3 py-2 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap sticky top-0 bg-slate-50"
+              >
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {rows.map((row, ri) => (
+            <tr key={ri} className={ri % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}>
+              {row.map((cell, ci) => (
+                <td key={ci} className="px-3 py-2 text-xs text-slate-700 whitespace-nowrap">
+                  {cell}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 export default function ReportsPage() {
   const { orgId } = useAuth()
+  const [expandedReports, setExpandedReports] = useState<Record<string, boolean>>({})
+
+  const toggleReport = (title: string) => {
+    setExpandedReports((prev) => ({ ...prev, [title]: !prev[title] }))
+  }
 
   const { data: summary, loading: l1 } = useQuery(() => getFinancialSummary(orgId!), [orgId])
   const { data: invoices, loading: l2 } = useQuery(() => getInvoices(orgId!), [orgId])
@@ -128,7 +170,6 @@ export default function ReportsPage() {
 
   function downloadOccupancy() {
     const headers = ['Room', 'Bed', 'Status', 'Tenant Name', 'Check-in Date', 'Monthly Rent']
-    // Build a lookup from occupancies
     const occByBedId: Record<string, any> = {}
     allOccupancies.forEach((occ: any) => {
       if (occ.bed_id || occ.bed?.id) {
@@ -220,6 +261,160 @@ export default function ReportsPage() {
     return colors[status] || 'bg-slate-100 text-slate-600'
   }
 
+  function priorityBadge(priority: string) {
+    const colors: Record<string, string> = {
+      high: 'bg-red-100 text-red-700',
+      medium: 'bg-amber-100 text-amber-700',
+      low: 'bg-blue-100 text-blue-700',
+      urgent: 'bg-red-200 text-red-800',
+    }
+    return colors[priority?.toLowerCase()] || 'bg-slate-100 text-slate-600'
+  }
+
+  function maintenanceStatusBadge(status: string) {
+    const colors: Record<string, string> = {
+      open: 'bg-red-100 text-red-700',
+      in_progress: 'bg-amber-100 text-amber-700',
+      resolved: 'bg-emerald-100 text-emerald-700',
+      closed: 'bg-slate-100 text-slate-600',
+    }
+    return colors[status] || 'bg-slate-100 text-slate-600'
+  }
+
+  function occupancyStatusBadge(status: string) {
+    const colors: Record<string, string> = {
+      occupied: 'bg-red-100 text-red-700',
+      vacant: 'bg-emerald-100 text-emerald-700',
+      maintenance: 'bg-amber-100 text-amber-700',
+    }
+    return colors[status?.toLowerCase()] || 'bg-slate-100 text-slate-600'
+  }
+
+  // ─── Table data builders ──────────────────────────────────────────
+
+  const occByBedId: Record<string, any> = {}
+  allOccupancies.forEach((occ: any) => {
+    if (occ.bed_id || occ.bed?.id) {
+      occByBedId[occ.bed_id || occ.bed?.id] = occ
+    }
+  })
+
+  function buildRentTableRows(): React.ReactNode[][] {
+    return allInvoices.map((inv: any, i: number) => {
+      const tenantName = inv.occupancy?.tenant?.full_name || 'Unknown'
+      const roomName = inv.occupancy?.bed?.room?.name || inv.occupancy?.bed?.room?.room_number || '-'
+      const rent = Number(inv.rent_amount || inv.total_amount || 0)
+      const gst = Number(inv.gst_amount || 0)
+      const total = Number(inv.total_amount || 0)
+      const paid = Number(inv.amount_paid || 0)
+      const status = inv.status || '-'
+      const dueDate = inv.due_date ? new Date(inv.due_date).toLocaleDateString('en-IN') : '-'
+      return [
+        <span key="n" className="text-slate-400">{i + 1}</span>,
+        <span key="t" className="font-medium text-slate-800">{tenantName}</span>,
+        roomName,
+        formatINR(rent),
+        formatINR(gst),
+        <span key="tot" className="font-medium">{formatINR(total)}</span>,
+        <span key="s" className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${statusBadge(status)}`}>{status}</span>,
+        dueDate,
+        formatINR(paid),
+      ]
+    })
+  }
+
+  function buildOccupancyTableRows(): React.ReactNode[][] {
+    return beds.map((bed: any, i: number) => {
+      const room = rooms.find((r: any) => r.id === bed.room_id)
+      const roomName = room?.name || room?.room_number || '-'
+      const bedName = bed.bed_number || '-'
+      const occ = occByBedId[bed.id]
+      const tenantName = occ?.tenant?.full_name || '-'
+      const checkIn = occ?.created_at ? new Date(occ.created_at).toLocaleDateString('en-IN') : '-'
+      const rent = occ?.monthly_rent ? formatINR(Number(occ.monthly_rent)) : (bed.monthly_rent ? formatINR(Number(bed.monthly_rent)) : '-')
+      const status = bed.status || '-'
+      return [
+        <span key="n" className="text-slate-400">{i + 1}</span>,
+        roomName,
+        bedName,
+        <span key="s" className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${occupancyStatusBadge(status)}`}>{status}</span>,
+        tenantName,
+        checkIn,
+        rent,
+      ]
+    })
+  }
+
+  function buildExpenseTableRows(): React.ReactNode[][] {
+    return allExpenses.map((exp: any, i: number) => [
+      <span key="n" className="text-slate-400">{i + 1}</span>,
+      exp.expense_date ? new Date(exp.expense_date).toLocaleDateString('en-IN') : '-',
+      <span key="c" className="capitalize">{exp.category || '-'}</span>,
+      <span key="d" className="max-w-[200px] truncate inline-block">{exp.description || '-'}</span>,
+      <span key="a" className="font-medium">{formatINR(Number(exp.amount || 0))}</span>,
+    ])
+  }
+
+  function buildTenantTableRows(): React.ReactNode[][] {
+    return allOccupancies.map((occ: any, i: number) => {
+      const t = occ.tenant || {}
+      const roomName = occ.bed?.room?.name || occ.bed?.room?.room_number || '-'
+      const checkIn = occ.created_at ? new Date(occ.created_at).toLocaleDateString('en-IN') : '-'
+      return [
+        <span key="n" className="text-slate-400">{i + 1}</span>,
+        <span key="name" className="font-medium text-slate-800">{t.full_name || '-'}</span>,
+        t.phone || '-',
+        roomName,
+        <span key="occ" className="capitalize">{t.occupation || '-'}</span>,
+        t.company_or_college || '-',
+        checkIn,
+      ]
+    })
+  }
+
+  function buildMaintenanceTableRows(): React.ReactNode[][] {
+    return allComplaints.map((c: any, i: number) => {
+      const date = c.created_at ? new Date(c.created_at).toLocaleDateString('en-IN') : '-'
+      const status = c.status || '-'
+      const priority = c.priority || '-'
+      return [
+        <span key="n" className="text-slate-400">{i + 1}</span>,
+        date,
+        c.room?.name || '-',
+        <span key="cat" className="capitalize">{c.category || '-'}</span>,
+        <span key="d" className="max-w-[200px] truncate inline-block">{c.description || '-'}</span>,
+        <span key="p" className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${priorityBadge(priority)}`}>{priority}</span>,
+        <span key="s" className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${maintenanceStatusBadge(status)}`}>{status.replace('_', ' ')}</span>,
+        c.assigned_to || '-',
+      ]
+    })
+  }
+
+  function buildPnLTableRows(): React.ReactNode[][] {
+    const rows: React.ReactNode[][] = [
+      [
+        <span key="c" className="font-semibold text-slate-800">Rent Collected</span>,
+        <span key="a" className="font-semibold text-emerald-600">{formatINR(fin.rentCollected)}</span>,
+      ],
+    ]
+    const expByCat = fin.expensesByCategory || {}
+    Object.entries(expByCat).forEach(([cat, amt]) => {
+      rows.push([
+        <span key="c" className="text-slate-600 capitalize pl-3">Expense: {cat}</span>,
+        <span key="a" className="text-red-500">-{formatINR(amt as number)}</span>,
+      ])
+    })
+    rows.push([
+      <span key="c" className="font-semibold text-slate-800 border-t border-slate-200 pt-1">Total Expenses</span>,
+      <span key="a" className="font-semibold text-red-500 border-t border-slate-200 pt-1">-{formatINR(fin.totalExpenses)}</span>,
+    ])
+    rows.push([
+      <span key="c" className="font-bold text-slate-900 text-sm">Net Profit</span>,
+      <span key="a" className={`font-bold text-sm ${fin.netProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{formatINR(fin.netProfit)}</span>,
+    ])
+    return rows
+  }
+
   // ─── Report definitions with inline previews ──────────────────────
 
   const reports = [
@@ -228,6 +423,8 @@ export default function ReportsPage() {
       desc: 'Who paid, who hasn\'t, overdue amounts',
       stats: `${allInvoices.filter((i: any) => i.status === 'paid').length} paid, ${unpaidCount} pending`,
       onDownload: downloadRentCollection,
+      tableHeaders: ['#', 'Tenant', 'Room', 'Rent', 'GST', 'Total', 'Status', 'Due Date', 'Paid'],
+      tableRows: buildRentTableRows,
       preview: (
         <div className="mt-3 mb-1">
           {rentTop5.length > 0 ? (
@@ -256,6 +453,8 @@ export default function ReportsPage() {
       desc: 'Bed status, vacancy rate',
       stats: `${occupancyRate}% occupied, ${vacantBeds} vacant`,
       onDownload: downloadOccupancy,
+      tableHeaders: ['#', 'Room', 'Bed', 'Status', 'Tenant', 'Check-in', 'Rent'],
+      tableRows: buildOccupancyTableRows,
       preview: (
         <div className="mt-3 mb-1">
           <div className="flex items-center gap-3">
@@ -286,6 +485,8 @@ export default function ReportsPage() {
       desc: 'Category-wise expense breakdown',
       stats: `${formatINR(fin.totalExpenses)} total this month`,
       onDownload: downloadExpenseReport,
+      tableHeaders: ['#', 'Date', 'Category', 'Description', 'Amount'],
+      tableRows: buildExpenseTableRows,
       preview: (
         <div className="mt-3 mb-1">
           <div className="text-lg font-bold text-slate-800">{formatINR(fin.totalExpenses)}</div>
@@ -312,6 +513,8 @@ export default function ReportsPage() {
       desc: 'Complete list with contact details',
       stats: `${allOccupancies.length} active tenants`,
       onDownload: downloadTenantDirectory,
+      tableHeaders: ['#', 'Name', 'Phone', 'Room', 'Occupation', 'Company', 'Check-in'],
+      tableRows: buildTenantTableRows,
       preview: (
         <div className="mt-3 mb-1">
           <div className="text-lg font-bold text-slate-800">{allOccupancies.length} <span className="text-sm font-medium text-slate-500">tenants</span></div>
@@ -334,6 +537,8 @@ export default function ReportsPage() {
       desc: 'Open complaints, resolution time',
       stats: `${openComplaints} open issues`,
       onDownload: downloadMaintenance,
+      tableHeaders: ['#', 'Date', 'Room', 'Category', 'Description', 'Priority', 'Status', 'Assigned'],
+      tableRows: buildMaintenanceTableRows,
       preview: (
         <div className="mt-3 mb-1">
           <div className="flex items-center gap-3">
@@ -358,6 +563,8 @@ export default function ReportsPage() {
       desc: 'Revenue minus expenses',
       stats: `Net: ${formatINR(fin.netProfit)}`,
       onDownload: downloadProfitLoss,
+      tableHeaders: ['Category', 'Amount'],
+      tableRows: buildPnLTableRows,
       preview: (
         <div className="mt-3 mb-1">
           <div className="grid grid-cols-3 gap-3">
@@ -395,22 +602,60 @@ export default function ReportsPage() {
       </div>
 
       <div className="space-y-3">
-        {reports.map((report) => (
-          <div key={report.title} className="bg-white rounded-xl p-4 shadow-sm border border-slate-100">
-            <p className="text-sm font-semibold text-slate-900">{report.title}</p>
-            <p className="text-[11px] text-slate-400 mt-0.5">{report.desc}</p>
-            <p className="text-[11px] text-slate-500 font-medium mt-1">{report.stats}</p>
-            {report.preview}
-            <div className="flex gap-2 mt-3">
-              <button
-                onClick={report.onDownload}
-                className="flex items-center gap-1.5 px-3 py-2 bg-primary text-white font-semibold rounded-lg text-xs hover:bg-primary-dark active:scale-[0.98] transition-all"
+        {reports.map((report) => {
+          const isExpanded = expandedReports[report.title] || false
+          return (
+            <div key={report.title} className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+              <div
+                className="p-4 cursor-pointer select-none"
+                onClick={() => toggleReport(report.title)}
               >
-                <Download className="w-3 h-3" /> Download CSV
-              </button>
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-slate-900">{report.title}</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">{report.desc}</p>
+                    <p className="text-[11px] text-slate-500 font-medium mt-1">{report.stats}</p>
+                  </div>
+                  <div className="p-1.5 rounded-lg bg-slate-50 ml-3 mt-0.5">
+                    {isExpanded ? (
+                      <ChevronUp className="w-4 h-4 text-slate-400" />
+                    ) : (
+                      <ChevronDown className="w-4 h-4 text-slate-400" />
+                    )}
+                  </div>
+                </div>
+                {!isExpanded && report.preview}
+              </div>
+
+              {isExpanded && (
+                <div className="px-4 pb-4">
+                  <DataTable headers={report.tableHeaders} rows={report.tableRows()} />
+                  <div className="flex gap-2 mt-3">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); report.onDownload() }}
+                      className="flex items-center gap-1.5 px-3 py-2 bg-primary text-white font-semibold rounded-lg text-xs hover:bg-primary-dark active:scale-[0.98] transition-all"
+                    >
+                      <Download className="w-3 h-3" /> Download CSV
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {!isExpanded && (
+                <div className="px-4 pb-4">
+                  <div className="flex gap-2 mt-1">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); report.onDownload() }}
+                      className="flex items-center gap-1.5 px-3 py-2 bg-primary text-white font-semibold rounded-lg text-xs hover:bg-primary-dark active:scale-[0.98] transition-all"
+                    >
+                      <Download className="w-3 h-3" /> Download CSV
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )
