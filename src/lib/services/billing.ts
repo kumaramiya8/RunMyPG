@@ -283,7 +283,7 @@ export async function getFinancialSummary(orgId: string) {
 export async function getReceiptSettings(orgId: string) {
   const { data, error } = await supabase
     .from('organizations')
-    .select('receipt_header, receipt_footer, receipt_show_gst, receipt_prefix, name, gst_number, gst_enabled, phone, email')
+    .select('receipt_header, receipt_footer, receipt_show_gst, receipt_prefix, name, gst_number, gst_enabled, phone, email, logo_url')
     .eq('id', orgId)
     .single()
   if (error) throw error

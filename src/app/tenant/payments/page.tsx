@@ -149,9 +149,10 @@ export default function TenantPaymentsPage() {
             const MethodIcon = paymentMethodIcons[payment.payment_method] || Smartphone
 
             return (
-              <div
+              <Link
                 key={payment.id}
-                className="bg-white rounded-xl p-3.5 border border-slate-100 shadow-sm"
+                href={`/tenant/receipt/${payment.id}`}
+                className="block bg-white rounded-xl p-3.5 border border-slate-100 shadow-sm hover:shadow-md active:bg-slate-50 transition-all"
               >
                 <div className="flex items-center gap-3">
                   <div className="p-2.5 rounded-xl bg-emerald-50 shrink-0">
@@ -178,9 +179,12 @@ export default function TenantPaymentsPage() {
                       <p className="text-[10px] text-slate-400 mt-1">Ref: {payment.transaction_ref}</p>
                     )}
                   </div>
-                  <ChevronRight className="w-4 h-4 text-slate-300 shrink-0" />
+                  <div className="flex flex-col items-end shrink-0">
+                    <span className="text-[10px] text-primary font-semibold">Receipt</span>
+                    <ChevronRight className="w-4 h-4 text-slate-300" />
+                  </div>
                 </div>
-              </div>
+              </Link>
             )
           })}
         </div>
