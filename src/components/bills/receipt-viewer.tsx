@@ -1,6 +1,7 @@
 'use client'
 
-import { Printer, Download } from 'lucide-react'
+import { useRef } from 'react'
+import { Printer, Download, Share2 } from 'lucide-react'
 
 interface ReceiptPayment {
   id: string
@@ -47,379 +48,234 @@ interface ReceiptViewerProps {
 }
 
 function formatINR(amount: number): string {
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    maximumFractionDigits: 2,
-  }).format(amount)
+  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(amount)
 }
 
 function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString('en-IN', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  })
+  try {
+    return new Date(dateStr).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+  } catch { return dateStr }
 }
 
 function paymentMethodLabel(method: string): string {
-  const labels: Record<string, string> = {
-    upi: 'UPI',
-    cash: 'Cash',
-    bank_transfer: 'Bank Transfer',
-    card: 'Card',
-  }
+  const labels: Record<string, string> = { upi: 'UPI', cash: 'Cash', bank_transfer: 'Bank Transfer', card: 'Card' }
   return labels[method] || method
 }
 
-function paymentTypeLabel(type: string): string {
-  const labels: Record<string, string> = {
-    rent: 'Rent',
-    deposit: 'Security Deposit',
-    advance: 'Advance Rent',
-  }
-  return labels[type] || type
-}
-
 function paymentTypeDescription(type: string): string {
-  const labels: Record<string, string> = {
-    rent: 'Monthly Rent',
-    deposit: 'Security Deposit',
-    advance: 'Advance Rent Payment',
-  }
+  const labels: Record<string, string> = { rent: 'Monthly Rent', deposit: 'Security Deposit', advance: 'Advance Rent Payment' }
   return labels[type] || type
 }
 
 function receiptTitle(type: string): string {
-  const labels: Record<string, string> = {
-    rent: 'RENT RECEIPT',
-    deposit: 'PAYMENT RECEIPT',
-    advance: 'PAYMENT RECEIPT',
-  }
+  const labels: Record<string, string> = { rent: 'RENT RECEIPT', deposit: 'DEPOSIT RECEIPT', advance: 'ADVANCE RECEIPT' }
   return labels[type] || 'PAYMENT RECEIPT'
 }
 
 function amountToWords(amount: number): string {
   if (amount === 0) return 'Zero Only'
-
-  const ones = [
-    '', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine',
-    'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen',
-    'Seventeen', 'Eighteen', 'Nineteen',
-  ]
-  const tens = [
-    '', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety',
-  ]
-
+  const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen']
+  const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety']
   const wholePart = Math.floor(Math.abs(amount))
-  const decimalPart = Math.round((Math.abs(amount) - wholePart) * 100)
-
-  function convertBelowHundred(n: number): string {
-    if (n < 20) return ones[n]
-    const t = tens[Math.floor(n / 10)]
-    const o = ones[n % 10]
-    return o ? `${t} ${o}` : t
-  }
-
-  function convertBelowThousand(n: number): string {
-    if (n < 100) return convertBelowHundred(n)
-    const h = ones[Math.floor(n / 100)]
-    const remainder = n % 100
-    const rest = remainder ? ` ${convertBelowHundred(remainder)}` : ''
-    return `${h} Hundred${rest}`
-  }
-
-  // Indian numbering: after thousands, we use Lakh (1,00,000) and Crore (1,00,00,000)
+  function convertBelowHundred(n: number): string { if (n < 20) return ones[n]; return ones[n % 10] ? `${tens[Math.floor(n / 10)]} ${ones[n % 10]}` : tens[Math.floor(n / 10)] }
+  function convertBelowThousand(n: number): string { if (n < 100) return convertBelowHundred(n); return `${ones[Math.floor(n / 100)]} Hundred${n % 100 ? ` ${convertBelowHundred(n % 100)}` : ''}` }
   function convertIndian(n: number): string {
-    if (n === 0) return ''
-    if (n < 1000) return convertBelowThousand(n)
-
-    let result = ''
-
-    // Crore (1,00,00,000)
-    if (n >= 10000000) {
-      const crores = Math.floor(n / 10000000)
-      result += `${convertBelowThousand(crores)} Crore`
-      n = n % 10000000
-      if (n > 0) result += ' '
-    }
-
-    // Lakh (1,00,000)
-    if (n >= 100000) {
-      const lakhs = Math.floor(n / 100000)
-      result += `${convertBelowHundred(lakhs)} Lakh`
-      n = n % 100000
-      if (n > 0) result += ' '
-    }
-
-    // Thousand
-    if (n >= 1000) {
-      const thousands = Math.floor(n / 1000)
-      result += `${convertBelowHundred(thousands)} Thousand`
-      n = n % 1000
-      if (n > 0) result += ' '
-    }
-
-    if (n > 0) {
-      result += convertBelowThousand(n)
-    }
-
-    return result
+    if (n === 0) return ''; if (n < 1000) return convertBelowThousand(n)
+    let r = ''
+    if (n >= 10000000) { r += `${convertBelowThousand(Math.floor(n / 10000000))} Crore `; n %= 10000000 }
+    if (n >= 100000) { r += `${convertBelowHundred(Math.floor(n / 100000))} Lakh `; n %= 100000 }
+    if (n >= 1000) { r += `${convertBelowHundred(Math.floor(n / 1000))} Thousand `; n %= 1000 }
+    if (n > 0) r += convertBelowThousand(n)
+    return r.trim()
   }
-
-  let words = convertIndian(wholePart)
-
-  if (decimalPart > 0) {
-    words += ` and ${convertBelowHundred(decimalPart)} Paise`
-  }
-
-  return `${words} Only`
+  return `Rupees ${convertIndian(wholePart)} Only`
 }
 
 export default function ReceiptViewer({ payment, tenant, room, bed, org }: ReceiptViewerProps) {
-  const receiptNumber = `${org.receipt_prefix || 'RCP'}${payment.id.slice(0, 8).toUpperCase()}`
+  const receiptRef = useRef<HTMLDivElement>(null)
+  const receiptNumber = `${org.receipt_prefix || 'RCP'}-${payment.id.slice(0, 8).toUpperCase()}`
   const showGst = org.receipt_show_gst && org.gst_enabled
-
   const totalAmount = Number(payment.amount)
-  const baseAmount = showGst ? totalAmount / 1.18 : totalAmount
-  const cgst = showGst ? baseAmount * 0.09 : 0
-  const sgst = showGst ? baseAmount * 0.09 : 0
+  const baseAmount = showGst ? Math.round((totalAmount / 1.18) * 100) / 100 : totalAmount
+  const cgst = showGst ? Math.round(baseAmount * 0.09 * 100) / 100 : 0
+  const sgst = showGst ? Math.round(baseAmount * 0.09 * 100) / 100 : 0
 
-  const handlePrint = () => {
-    window.print()
+  const handlePrint = () => window.print()
+
+  const handleDownloadPDF = () => {
+    if (!receiptRef.current) return
+    // Create a new window with just the receipt content for PDF download
+    const printWindow = window.open('', '_blank')
+    if (!printWindow) { handlePrint(); return }
+
+    const content = receiptRef.current.innerHTML
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html><head><title>Receipt - ${receiptNumber}</title>
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: system-ui, -apple-system, sans-serif; color: #1e293b; padding: 20px; max-width: 800px; margin: 0 auto; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border: 1px solid #e2e8f0; padding: 8px 12px; text-align: left; font-size: 13px; }
+        th { background: #f8fafc; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; }
+        .header { display: flex; gap: 16px; align-items: flex-start; margin-bottom: 16px; }
+        .logo { width: 60px; height: 60px; background: #0f172a; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: white; font-size: 24px; font-weight: bold; flex-shrink: 0; }
+        .logo img { width: 100%; height: 100%; object-fit: contain; border-radius: 8px; }
+        .org-name { font-size: 18px; font-weight: 700; }
+        .title-bar { background: #0f172a; color: white; text-align: center; padding: 8px; font-size: 13px; font-weight: 700; letter-spacing: 0.15em; margin: 12px 0; }
+        .details-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; border: 1px solid #e2e8f0; border-radius: 6px; overflow: hidden; margin: 16px 0; }
+        .details-grid > div { padding: 10px 14px; border-right: 1px solid #e2e8f0; }
+        .details-grid > div:last-child { border-right: none; }
+        .label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.08em; color: #94a3b8; font-weight: 600; }
+        .value { font-size: 13px; font-weight: 600; color: #1e293b; margin-top: 2px; }
+        .bill-to { margin: 16px 0; }
+        .amount-words { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 14px; margin: 16px 0; font-size: 12px; color: #64748b; }
+        .footer { border-top: 1px solid #e2e8f0; padding-top: 16px; margin-top: 16px; text-align: center; font-size: 10px; color: #94a3b8; }
+        .total-row { background: #f8fafc; font-weight: 700; font-size: 15px; }
+        .text-right { text-align: right; }
+        .text-sm { font-size: 12px; }
+        .text-xs { font-size: 11px; color: #64748b; }
+        @media print { body { padding: 0; } }
+      </style></head><body>
+      ${content}
+      <script>window.onload = function() { window.print(); window.onafterprint = function() { window.close(); } }</script>
+      </body></html>
+    `)
+    printWindow.document.close()
+  }
+
+  const handleShare = async () => {
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: `Receipt ${receiptNumber}`,
+          text: `Payment receipt of ${formatINR(totalAmount)} from ${org.name}`,
+          url: window.location.href,
+        })
+      } catch { /* user cancelled */ }
+    }
   }
 
   return (
     <>
       <style jsx global>{`
         @media print {
-          body * {
-            visibility: hidden;
-          }
-          #receipt-container,
-          #receipt-container * {
-            visibility: visible;
-          }
-          #receipt-container {
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 100%;
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 0;
-            box-shadow: none;
-            border: none;
-            border-radius: 0;
-          }
-          .no-print {
-            display: none !important;
-          }
-          @page {
-            size: A4;
-            margin: 15mm;
-          }
+          body * { visibility: hidden; }
+          #receipt-print, #receipt-print * { visibility: visible; }
+          #receipt-print { position: absolute; left: 0; top: 0; width: 100%; }
+          .no-print { display: none !important; }
+          @page { size: A4; margin: 15mm; }
         }
       `}</style>
 
       <div className="max-w-2xl mx-auto">
         {/* Action buttons */}
-        <div className="no-print flex gap-3 mb-6">
-          <button
-            onClick={handlePrint}
-            className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-primary text-white font-semibold rounded-xl text-sm hover:bg-primary-dark active:scale-[0.98] transition-all"
-          >
-            <Printer className="w-4 h-4" />
-            Print Receipt
+        <div className="no-print flex gap-2 mb-4">
+          <button onClick={handlePrint} className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-primary text-white font-semibold rounded-xl text-sm hover:bg-primary-dark active:scale-[0.98] transition-all">
+            <Printer className="w-4 h-4" /> Print
           </button>
-          <button
-            onClick={handlePrint}
-            className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-slate-100 text-slate-700 font-semibold rounded-xl text-sm hover:bg-slate-200 active:scale-[0.98] transition-all"
-          >
-            <Download className="w-4 h-4" />
-            Download PDF
+          <button onClick={handleDownloadPDF} className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-slate-900 text-white font-semibold rounded-xl text-sm hover:bg-slate-800 active:scale-[0.98] transition-all">
+            <Download className="w-4 h-4" /> Download PDF
           </button>
+          {typeof navigator !== 'undefined' && typeof navigator.share === 'function' && (
+            <button onClick={handleShare} className="flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-50 text-emerald-700 font-semibold rounded-xl text-sm hover:bg-emerald-100 active:scale-[0.98] transition-all">
+              <Share2 className="w-4 h-4" />
+            </button>
+          )}
         </div>
 
-        {/* Receipt */}
-        <div
-          id="receipt-container"
-          className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden"
-        >
+        {/* Receipt content */}
+        <div id="receipt-print" ref={receiptRef} className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
           {/* Header */}
-          <div className="px-8 pt-8 pb-5">
-            <div className="flex items-start gap-5">
+          <div className="header px-8 pt-8 pb-4">
+            <div className="flex items-start gap-4">
               {org.logo_url ? (
-                <img
-                  src={org.logo_url}
-                  alt={org.name}
-                  className="w-16 h-16 object-contain rounded-lg flex-shrink-0"
-                />
+                <img src={org.logo_url} alt={org.name} className="w-14 h-14 object-contain rounded-lg shrink-0" />
               ) : (
-                <div className="w-16 h-16 bg-slate-900 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <span className="text-white text-2xl font-bold">
-                    {org.name.charAt(0).toUpperCase()}
-                  </span>
+                <div className="logo w-14 h-14 bg-slate-900 rounded-lg flex items-center justify-center shrink-0">
+                  <span className="text-white text-xl font-bold">{org.name.charAt(0)}</span>
                 </div>
               )}
-              <div className="flex-1 min-w-0">
-                <h1 className="text-xl font-bold text-slate-900 leading-tight">
-                  {org.name}
-                </h1>
-                {org.address && (
-                  <p className="text-xs text-slate-500 mt-1">{org.address}</p>
-                )}
-                <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1">
-                  {org.phone && (
-                    <p className="text-xs text-slate-500">Ph: {org.phone}</p>
-                  )}
-                  {org.email && (
-                    <p className="text-xs text-slate-500">{org.email}</p>
-                  )}
+              <div className="flex-1">
+                <p className="org-name text-lg font-bold text-slate-900">{org.name}</p>
+                {org.address && <p className="text-xs text-slate-500 mt-0.5">{org.address}</p>}
+                <div className="flex flex-wrap gap-x-3 mt-0.5">
+                  {org.phone && <p className="text-xs text-slate-500">Ph: {org.phone}</p>}
+                  {org.email && <p className="text-xs text-slate-500">{org.email}</p>}
                 </div>
-                {org.gst_number && (
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    GSTIN: <span className="font-mono">{org.gst_number}</span>
-                  </p>
-                )}
+                {org.gst_number && <p className="text-xs text-slate-500 mt-0.5">GSTIN: <span className="font-mono">{org.gst_number}</span></p>}
               </div>
             </div>
-            {org.receipt_header && (
-              <p className="text-xs text-slate-500 mt-3 text-center">
-                {org.receipt_header}
-              </p>
-            )}
+            {org.receipt_header && <p className="text-xs text-slate-500 mt-3 text-center">{org.receipt_header}</p>}
           </div>
 
-          {/* Title bar */}
-          <div className="bg-slate-900 py-2.5 text-center">
-            <h2 className="text-sm font-bold text-white tracking-[0.2em] uppercase">
-              {receiptTitle(payment.payment_type)}
-            </h2>
+          {/* Title */}
+          <div className="title-bar bg-slate-900 py-2 text-center">
+            <h2 className="text-sm font-bold text-white tracking-[0.15em]">{receiptTitle(payment.payment_type)}</h2>
           </div>
 
-          {/* Receipt details box */}
-          <div className="mx-8 mt-6 border border-slate-200 rounded-lg overflow-hidden">
-            <div className="grid grid-cols-3 divide-x divide-slate-200">
-              <div className="px-4 py-3">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                  Receipt No.
-                </p>
-                <p className="text-sm font-bold text-slate-900 mt-0.5">
-                  {receiptNumber}
-                </p>
-              </div>
-              <div className="px-4 py-3">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                  Date
-                </p>
-                <p className="text-sm font-medium text-slate-700 mt-0.5">
-                  {formatDate(payment.payment_date)}
-                </p>
-              </div>
-              <div className="px-4 py-3">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                  Payment Method
-                </p>
-                <p className="text-sm font-medium text-slate-700 mt-0.5">
-                  {paymentMethodLabel(payment.payment_method)}
-                </p>
-                {payment.transaction_ref && (
-                  <p className="text-[10px] text-slate-400 font-mono mt-0.5">
-                    Ref: {payment.transaction_ref}
-                  </p>
-                )}
-              </div>
+          {/* Details grid */}
+          <div className="details-grid mx-6 mt-5 border border-slate-200 rounded-lg overflow-hidden grid grid-cols-3 divide-x divide-slate-200">
+            <div className="px-3 py-2.5">
+              <p className="label text-[9px] font-semibold uppercase tracking-wider text-slate-400">Receipt No.</p>
+              <p className="value text-sm font-bold text-slate-900 mt-0.5">{receiptNumber}</p>
+            </div>
+            <div className="px-3 py-2.5">
+              <p className="label text-[9px] font-semibold uppercase tracking-wider text-slate-400">Date</p>
+              <p className="value text-sm font-medium text-slate-700 mt-0.5">{formatDate(payment.payment_date)}</p>
+            </div>
+            <div className="px-3 py-2.5">
+              <p className="label text-[9px] font-semibold uppercase tracking-wider text-slate-400">Method</p>
+              <p className="value text-sm font-medium text-slate-700 mt-0.5">{paymentMethodLabel(payment.payment_method)}</p>
+              {payment.transaction_ref && <p className="text-[9px] text-slate-400 font-mono mt-0.5">Ref: {payment.transaction_ref}</p>}
             </div>
           </div>
 
           {/* Bill To */}
-          <div className="mx-8 mt-5">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
-              Bill To
-            </p>
+          <div className="bill-to mx-6 mt-4">
+            <p className="label text-[9px] font-semibold uppercase tracking-wider text-slate-400 mb-1">Bill To</p>
             <p className="text-sm font-bold text-slate-900">{tenant.full_name}</p>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Room: {room.name}
-              {bed ? ` | Bed: ${bed.bed_number}` : ''}
-            </p>
-            {tenant.phone && (
-              <p className="text-xs text-slate-500 mt-0.5">Ph: {tenant.phone}</p>
-            )}
+            <p className="text-xs text-slate-500 mt-0.5">Room: {room.name}{bed ? ` | Bed: ${bed.bed_number}` : ''}</p>
+            {tenant.phone && <p className="text-xs text-slate-500 mt-0.5">Ph: {tenant.phone}</p>}
           </div>
 
-          {/* Payment breakdown table */}
-          <div className="mx-8 mt-5 mb-6">
+          {/* Table */}
+          <div className="mx-6 mt-4 mb-5">
             <table className="w-full text-sm border-collapse">
               <thead>
                 <tr className="bg-slate-50">
-                  <th className="text-left py-2.5 px-4 text-[10px] font-semibold uppercase tracking-wider text-slate-500 border border-slate-200">
-                    Description
-                  </th>
-                  <th className="text-right py-2.5 px-4 text-[10px] font-semibold uppercase tracking-wider text-slate-500 border border-slate-200 w-36">
-                    Amount
-                  </th>
+                  <th className="text-left py-2 px-3 text-[9px] font-semibold uppercase tracking-wider text-slate-500 border border-slate-200">Description</th>
+                  <th className="text-right py-2 px-3 text-[9px] font-semibold uppercase tracking-wider text-slate-500 border border-slate-200 w-32">Amount</th>
                 </tr>
               </thead>
               <tbody>
                 <tr>
-                  <td className="py-2.5 px-4 text-slate-700 border border-slate-200">
-                    {paymentTypeDescription(payment.payment_type)}
-                  </td>
-                  <td className="py-2.5 px-4 text-slate-700 text-right font-medium border border-slate-200">
-                    {formatINR(baseAmount)}
-                  </td>
+                  <td className="py-2 px-3 text-slate-700 border border-slate-200">{paymentTypeDescription(payment.payment_type)}</td>
+                  <td className="py-2 px-3 text-slate-700 text-right font-medium border border-slate-200">{formatINR(baseAmount)}</td>
                 </tr>
                 {showGst && (
                   <>
-                    <tr>
-                      <td className="py-2 px-4 text-slate-500 text-xs border border-slate-200">
-                        CGST @ 9%
-                      </td>
-                      <td className="py-2 px-4 text-slate-500 text-xs text-right border border-slate-200">
-                        {formatINR(cgst)}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="py-2 px-4 text-slate-500 text-xs border border-slate-200">
-                        SGST @ 9%
-                      </td>
-                      <td className="py-2 px-4 text-slate-500 text-xs text-right border border-slate-200">
-                        {formatINR(sgst)}
-                      </td>
-                    </tr>
+                    <tr><td className="py-1.5 px-3 text-slate-500 text-xs border border-slate-200">CGST @ 9%</td><td className="py-1.5 px-3 text-slate-500 text-xs text-right border border-slate-200">{formatINR(cgst)}</td></tr>
+                    <tr><td className="py-1.5 px-3 text-slate-500 text-xs border border-slate-200">SGST @ 9%</td><td className="py-1.5 px-3 text-slate-500 text-xs text-right border border-slate-200">{formatINR(sgst)}</td></tr>
                   </>
                 )}
-                <tr className="bg-slate-50">
-                  <td className="py-3 px-4 font-bold text-slate-900 border border-slate-200">
-                    Total Amount
-                  </td>
-                  <td className="py-3 px-4 font-bold text-slate-900 text-right text-base border border-slate-200">
-                    {formatINR(totalAmount)}
-                  </td>
+                <tr className="total-row bg-slate-50">
+                  <td className="py-2.5 px-3 font-bold text-slate-900 border border-slate-200">Total Amount</td>
+                  <td className="py-2.5 px-3 font-bold text-slate-900 text-right text-base border border-slate-200">{formatINR(totalAmount)}</td>
                 </tr>
               </tbody>
             </table>
           </div>
 
           {/* Amount in words */}
-          <div className="mx-8 mb-6 px-4 py-3 bg-slate-50 rounded-lg border border-slate-200">
-            <p className="text-xs text-slate-500">
-              <span className="font-semibold text-slate-600">Amount in words:</span>{' '}
-              <span className="italic">{amountToWords(totalAmount)}</span>
-            </p>
+          <div className="amount-words mx-6 mb-5 px-3 py-2.5 bg-slate-50 rounded-lg border border-slate-200">
+            <p className="text-xs text-slate-500"><span className="font-semibold text-slate-600">Amount in words:</span> <span className="italic">{amountToWords(totalAmount)}</span></p>
           </div>
 
           {/* Footer */}
-          <div className="border-t border-slate-200 px-8 py-5">
-            {org.receipt_footer && (
-              <p className="text-xs text-slate-600 text-center mb-3">
-                {org.receipt_footer}
-              </p>
-            )}
-            <p className="text-[10px] text-slate-400 text-center">
-              This is a computer generated receipt
-            </p>
+          <div className="footer border-t border-slate-200 px-6 py-4">
+            {org.receipt_footer && <p className="text-xs text-slate-600 text-center mb-2">{org.receipt_footer}</p>}
+            <p className="text-[10px] text-slate-400 text-center">This is a computer generated receipt</p>
           </div>
         </div>
       </div>
