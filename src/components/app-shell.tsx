@@ -24,12 +24,12 @@ function ShellContent({ children }: { children: React.ReactNode }) {
     return <AuthGuard>{children}</AuthGuard>
   }
 
-  // Tenant portal — custom nav
+  // Tenant portal — responsive layout
   if (isTenant || isTenantPage) {
     return (
       <AuthGuard>
         <TenantHeader />
-        <main className="flex-1 pb-20">
+        <main className="flex-1 pb-20 md:pb-6 max-w-5xl mx-auto w-full">
           {children}
         </main>
         <TenantNav />
