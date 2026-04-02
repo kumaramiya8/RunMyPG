@@ -8,7 +8,7 @@ import {
   Receipt,
   CreditCard,
   Banknote,
-  Wallet,
+  Smartphone,
   ChevronRight,
   Calendar,
   TrendingUp,
@@ -27,7 +27,7 @@ const paymentTypeLabels: Record<string, { label: string; color: string }> = {
 
 const paymentMethodIcons: Record<string, typeof CreditCard> = {
   cash: Banknote,
-  upi: Wallet,
+  upi: Smartphone,
   bank_transfer: CreditCard,
   card: CreditCard,
 }
@@ -327,7 +327,7 @@ export default function TenantPaymentsPage() {
                   label: payment.payment_type || 'Payment',
                   color: 'bg-slate-50 text-slate-600',
                 }
-                const MethodIcon = paymentMethodIcons[payment.payment_method] || Wallet
+                const MethodIcon = paymentMethodIcons[payment.payment_method] || Smartphone
 
                 return (
                   <Link
