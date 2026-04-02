@@ -10,30 +10,42 @@ import ReceiptViewer from '@/components/bills/receipt-viewer'
 import { ListSkeleton } from '@/components/loading-skeleton'
 
 async function fetchReceiptData(paymentId: string, tenantId: string, orgId: string) {
-  // Get payment — query through occupancy -> tenant to ensure RLS allows it
-  const { data: payment, error: payErr } = await supabase
+  // Step 1: Get tenant's occupancy first (tenant_users RLS allows this)
+  const { data: occupancies } = await supabase
+    .from('occupancies')
+    .select('id, tenant_id, monthly_rent, deposit_amount, bed_id')
+    .eq('tenant_id', tenantId)
+
+  if (!occupancies?.length) return { error: 'No occupancy found for tenant' }
+
+  const occIds = occupancies.map((o) => o.id)
+
+  // Step 2: Get the specific payment using occupancy IDs (bypasses payments RLS issue)
+  const { data: allPayments, error: payErr } = await supabase
     .from('payments')
     .select('*')
-    .eq('id', paymentId)
-    .maybeSingle()
+    .in('occupancy_id', occIds)
 
-  if (payErr || !payment) return null
+  if (payErr) return { error: `Payment query error: ${payErr.message}` }
 
-  // Get occupancy with tenant and bed/room
+  const payment = (allPayments || []).find((p: any) => p.id === paymentId)
+  if (!payment) return { error: `Payment not found. ID: ${paymentId}. Total payments: ${allPayments?.length || 0}` }
+
+  // Step 3: Get occupancy with tenant and bed/room joins
   const { data: occ } = await supabase
     .from('occupancies')
-    .select('*, tenant:tenants(*), bed:beds(*, room:rooms(*))')
+    .select('*, tenant:tenants(full_name, phone), bed:beds(bed_number, room:rooms(name))')
     .eq('id', payment.occupancy_id)
     .maybeSingle()
 
-  // Get org settings
+  // Step 4: Get org settings
   const { data: org } = await supabase
     .from('organizations')
     .select('name, logo_url, gst_number, gst_enabled, receipt_header, receipt_footer, receipt_prefix, receipt_show_gst, phone, email')
     .eq('id', orgId)
     .maybeSingle()
 
-  return { payment, occupancy: occ, org }
+  return { payment, occupancy: occ, org, error: null }
 }
 
 export default function TenantReceiptPage() {
@@ -41,7 +53,7 @@ export default function TenantReceiptPage() {
   const paymentId = params.id as string
   const { orgId, orgName, tenantId } = useAuth()
 
-  const { data, loading, error } = useQuery(
+  const { data, loading, error: queryError } = useQuery(
     async () => {
       if (!paymentId || !tenantId || !orgId) return null
       return fetchReceiptData(paymentId, tenantId, orgId)
@@ -55,11 +67,20 @@ export default function TenantReceiptPage() {
     </div>
   )
 
-  if (error || !data?.payment) {
+  // Show detailed error
+  if (queryError || data?.error || !data?.payment) {
     return (
-      <div className="px-4 py-8 text-center">
-        <p className="text-sm text-red-500 font-medium">{error || 'Receipt not found'}</p>
-        <Link href="/tenant/payments" className="text-xs text-primary font-semibold mt-3 inline-block">Back to Payments</Link>
+      <div className="px-4 py-8 max-w-lg mx-auto">
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-center">
+          <p className="text-sm text-red-600 font-medium mb-2">Could not load receipt</p>
+          <p className="text-xs text-red-500">{queryError || data?.error || 'Payment data not found'}</p>
+          <p className="text-[10px] text-red-400 mt-2 font-mono">
+            paymentId: {paymentId} | tenantId: {tenantId || 'null'} | orgId: {orgId || 'null'}
+          </p>
+        </div>
+        <Link href="/tenant/payments" className="block text-center text-sm text-primary font-semibold mt-4">
+          Back to Payments
+        </Link>
       </div>
     )
   }
@@ -71,9 +92,16 @@ export default function TenantReceiptPage() {
 
   if (!tenant || !room) {
     return (
-      <div className="px-4 py-8 text-center">
-        <p className="text-sm text-slate-500">Could not load receipt details.</p>
-        <Link href="/tenant/payments" className="text-xs text-primary font-semibold mt-3 inline-block">Back to Payments</Link>
+      <div className="px-4 py-8 max-w-lg mx-auto">
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-center">
+          <p className="text-sm text-amber-700 font-medium">Receipt loaded but missing details</p>
+          <p className="text-xs text-amber-600 mt-1">
+            Payment: ₹{payment.amount} | Tenant: {tenant ? 'found' : 'missing'} | Room: {room ? 'found' : 'missing'}
+          </p>
+        </div>
+        <Link href="/tenant/payments" className="block text-center text-sm text-primary font-semibold mt-4">
+          Back to Payments
+        </Link>
       </div>
     )
   }
@@ -95,7 +123,7 @@ export default function TenantReceiptPage() {
           id: payment.id,
           amount: payment.amount,
           payment_date: payment.payment_date || payment.created_at,
-          payment_method: payment.payment_method,
+          payment_method: payment.payment_method || 'cash',
           payment_type: payment.payment_type || 'rent',
           transaction_ref: payment.transaction_ref,
         }}
