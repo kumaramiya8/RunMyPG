@@ -77,7 +77,7 @@ async function fetchPayments(tenantId: string) {
     .neq('status', 'checked_out')
     .single()
 
-  if (occError || !occupancy) throw new Error('Could not find active occupancy')
+  if (occError || !occupancy) return { payments: [], occupancy: null, invoices: [] }
 
   // Get all payments for this occupancy
   const { data: payments, error: payError } = await supabase
@@ -86,7 +86,7 @@ async function fetchPayments(tenantId: string) {
     .eq('occupancy_id', occupancy.id)
     .order('payment_date', { ascending: false })
 
-  if (payError) throw new Error('Could not load payments')
+  if (payError) return { payments: [], occupancy, invoices: [] }
 
   // Get invoices for this occupancy (for calendar)
   const { data: invoices, error: invError } = await supabase
@@ -108,8 +108,11 @@ export default function TenantPaymentsPage() {
   const listRef = useRef<HTMLDivElement>(null)
   const monthRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
-  const { data, loading } = useQuery(
-    () => fetchPayments(tenantId!),
+  const { data, loading, error } = useQuery(
+    async () => {
+      if (!tenantId) return null
+      return fetchPayments(tenantId)
+    },
     [tenantId]
   )
 
