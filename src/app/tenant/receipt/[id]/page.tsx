@@ -31,12 +31,23 @@ async function fetchReceiptData(paymentId: string, tenantId: string, orgId: stri
   const payment = (allPayments || []).find((p: any) => p.id === paymentId)
   if (!payment) return { error: `Payment not found. ID: ${paymentId}. Total payments: ${allPayments?.length || 0}` }
 
-  // Step 3: Get occupancy with tenant and bed/room joins
+  // Step 3: Get occupancy with tenant
   const { data: occ } = await supabase
     .from('occupancies')
-    .select('*, tenant:tenants(full_name, phone), bed:beds(bed_number, room:rooms(name))')
+    .select('*, tenant:tenants(full_name, phone), bed:beds(bed_number, room_id)')
     .eq('id', payment.occupancy_id)
     .maybeSingle()
+
+  // Step 3b: Get room separately (nested joins can fail with RLS)
+  let roomData: any = null
+  if (occ?.bed?.room_id) {
+    const { data: rm } = await supabase
+      .from('rooms')
+      .select('name')
+      .eq('id', occ.bed.room_id)
+      .maybeSingle()
+    roomData = rm
+  }
 
   // Step 4: Get org settings
   const { data: org } = await supabase
@@ -45,7 +56,7 @@ async function fetchReceiptData(paymentId: string, tenantId: string, orgId: stri
     .eq('id', orgId)
     .maybeSingle()
 
-  return { payment, occupancy: occ, org, error: null }
+  return { payment, occupancy: occ, room: roomData, org, error: null }
 }
 
 export default function TenantReceiptPage() {
@@ -85,19 +96,15 @@ export default function TenantReceiptPage() {
     )
   }
 
-  const { payment, occupancy, org: orgSettings } = data
+  const { payment, occupancy, room: roomData, org: orgSettings } = data
   const tenant = occupancy?.tenant
   const bed = occupancy?.bed
-  const room = bed?.room
 
-  if (!tenant || !room) {
+  if (!tenant) {
     return (
       <div className="px-4 py-8 max-w-lg mx-auto">
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-center">
-          <p className="text-sm text-amber-700 font-medium">Receipt loaded but missing details</p>
-          <p className="text-xs text-amber-600 mt-1">
-            Payment: ₹{payment.amount} | Tenant: {tenant ? 'found' : 'missing'} | Room: {room ? 'found' : 'missing'}
-          </p>
+          <p className="text-sm text-amber-700 font-medium">Receipt loaded but missing tenant details</p>
         </div>
         <Link href="/tenant/payments" className="block text-center text-sm text-primary font-semibold mt-4">
           Back to Payments
@@ -128,7 +135,7 @@ export default function TenantReceiptPage() {
           transaction_ref: payment.transaction_ref,
         }}
         tenant={{ full_name: tenant.full_name, phone: tenant.phone }}
-        room={{ name: room.name }}
+        room={{ name: roomData?.name || 'N/A' }}
         bed={bed ? { bed_number: bed.bed_number } : null}
         org={{
           name: orgSettings?.name || orgName || 'Organization',
