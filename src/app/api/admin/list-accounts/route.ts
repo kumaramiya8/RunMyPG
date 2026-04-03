@@ -61,6 +61,13 @@ export async function GET() {
           .select('id', { count: 'exact', head: true })
           .eq('org_id', org.id)
 
+        // Check if account is active (any active staff member means account is active)
+        const { count: activeStaffCount } = await supabaseAdmin
+          .from('staff_members')
+          .select('id', { count: 'exact', head: true })
+          .eq('org_id', org.id)
+          .eq('is_active', true)
+
         return {
           id: org.id,
           name: org.name,
@@ -68,9 +75,11 @@ export async function GET() {
           account_type: org.account_type,
           owner_name: staff?.name || null,
           owner_email: ownerEmail,
+          owner_user_id: staff?.user_id || null,
           created_at: org.created_at,
           tenant_count: tenantCount || 0,
           building_count: buildingCount || 0,
+          is_active: (activeStaffCount || 0) > 0,
         }
       })
     )
