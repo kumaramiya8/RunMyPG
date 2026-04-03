@@ -43,8 +43,25 @@ export async function getBeds(roomId: string) {
 // ── Building entity IDs helper ─────────────────────────────────────
 
 export async function getBuildingEntityIds(buildingId: string) {
-  const { data } = await supabase.rpc('get_building_entity_ids', { p_building_id: buildingId })
-  return data as { floor_ids: string[]; room_ids: string[]; bed_ids: string[] } | null
+  // Try RPC first, fall back to direct queries
+  const { data: rpcData, error: rpcErr } = await supabase.rpc('get_building_entity_ids', { p_building_id: buildingId })
+  if (!rpcErr && rpcData) {
+    return rpcData as { floor_ids: string[]; room_ids: string[]; bed_ids: string[] }
+  }
+
+  // Fallback: direct queries
+  const { data: floors } = await supabase.from('floors').select('id').eq('building_id', buildingId)
+  const floorIds = (floors || []).map((f) => f.id)
+  if (!floorIds.length) return { floor_ids: [], room_ids: [], bed_ids: [] }
+
+  const { data: rooms } = await supabase.from('rooms').select('id').in('floor_id', floorIds)
+  const roomIds = (rooms || []).map((r) => r.id)
+  if (!roomIds.length) return { floor_ids: floorIds, room_ids: [], bed_ids: [] }
+
+  const { data: beds } = await supabase.from('beds').select('id').in('room_id', roomIds)
+  const bedIds = (beds || []).map((b) => b.id)
+
+  return { floor_ids: floorIds, room_ids: roomIds, bed_ids: bedIds }
 }
 
 // ── Full property tree ─────────────────────────────────────────────
