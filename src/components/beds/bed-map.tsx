@@ -21,6 +21,7 @@ import {
 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
+import { useBuilding } from '@/lib/building-context'
 import { useQuery } from '@/lib/hooks/use-query'
 import { getFullPropertyTree } from '@/lib/services/property'
 import { getActiveOccupancies, bookAdvance } from '@/lib/services/tenants'
@@ -382,18 +383,19 @@ function ordinal(n: number): string {
 
 export default function BedMap() {
   const { orgId } = useAuth()
+  const { selectedBuildingId } = useBuilding()
   const [selectedBed, setSelectedBed] = useState<BedType | null>(null)
   const [bookAdvanceBed, setBookAdvanceBed] = useState<BedType | null>(null)
   const [filterStatus, setFilterStatus] = useState<BedStatus | 'all'>('all')
 
   const { data: property, loading: propertyLoading, refetch: refetchProperty } = useQuery(
-    () => getFullPropertyTree(orgId!),
-    [orgId]
+    () => getFullPropertyTree(orgId!, selectedBuildingId),
+    [orgId, selectedBuildingId]
   )
 
   const { data: occupancies, loading: occupanciesLoading, refetch: refetchOccupancies } = useQuery(
-    () => getActiveOccupancies(orgId!),
-    [orgId]
+    () => getActiveOccupancies(orgId!, selectedBuildingId),
+    [orgId, selectedBuildingId]
   )
 
   const loading = propertyLoading || occupanciesLoading

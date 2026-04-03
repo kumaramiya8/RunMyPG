@@ -9,6 +9,7 @@ import PendingRent from '@/components/dashboard/pending-rent'
 import RecentComplaints from '@/components/dashboard/recent-complaints'
 import { PageSkeleton } from '@/components/loading-skeleton'
 import { useAuth } from '@/lib/auth-context'
+import { useBuilding } from '@/lib/building-context'
 import { useQuery } from '@/lib/hooks/use-query'
 import { getFullPropertyTree } from '@/lib/services/property'
 import { getFinancialSummary } from '@/lib/services/billing'
@@ -28,25 +29,26 @@ function formatINR(amount: number): string {
 
 export default function DashboardPage() {
   const { orgId, staffName } = useAuth()
+  const { selectedBuildingId } = useBuilding()
 
   const { data: propertyTree, loading: loadingProperty } = useQuery(
-    () => (orgId ? getFullPropertyTree(orgId) : Promise.resolve(null)),
-    [orgId]
+    () => (orgId ? getFullPropertyTree(orgId, selectedBuildingId) : Promise.resolve(null)),
+    [orgId, selectedBuildingId]
   )
 
   const { data: financials, loading: loadingFinancials } = useQuery(
-    () => (orgId ? getFinancialSummary(orgId) : Promise.resolve(null)),
-    [orgId]
+    () => (orgId ? getFinancialSummary(orgId, selectedBuildingId) : Promise.resolve(null)),
+    [orgId, selectedBuildingId]
   )
 
   const { data: complaints, loading: loadingComplaints } = useQuery(
-    () => (orgId ? getComplaints(orgId) : Promise.resolve(null)),
-    [orgId]
+    () => (orgId ? getComplaints(orgId, selectedBuildingId) : Promise.resolve(null)),
+    [orgId, selectedBuildingId]
   )
 
   const { data: occupancies, loading: loadingOccupancies } = useQuery(
-    () => (orgId ? getActiveOccupancies(orgId) : Promise.resolve(null)),
-    [orgId]
+    () => (orgId ? getActiveOccupancies(orgId, selectedBuildingId) : Promise.resolve(null)),
+    [orgId, selectedBuildingId]
   )
 
   const loading = loadingProperty || loadingFinancials || loadingComplaints || loadingOccupancies

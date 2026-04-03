@@ -1,11 +1,20 @@
 import { supabase } from '../supabase'
+import { getBuildingEntityIds } from './property'
 
-export async function getComplaints(orgId: string) {
-  const { data, error } = await supabase
+export async function getComplaints(orgId: string, buildingId?: string | null) {
+  let query = supabase
     .from('complaints')
     .select('*, tenant:tenants(full_name), room:rooms(name)')
     .eq('org_id', orgId)
     .order('created_at', { ascending: false })
+
+  if (buildingId) {
+    const entityIds = await getBuildingEntityIds(buildingId)
+    if (!entityIds?.room_ids?.length) return []
+    query = query.in('room_id', entityIds.room_ids)
+  }
+
+  const { data, error } = await query
   if (error) throw error
   return data
 }

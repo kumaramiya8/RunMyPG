@@ -756,7 +756,7 @@ function AmenityChip({ icon: Icon, label }: { icon: typeof Snowflake; label: str
 // ── Main Component ──────────────────────────────────────────────────
 
 export default function BuildingSetup() {
-  const { orgId } = useAuth()
+  const { orgId, isMaster } = useAuth()
   const { data: tree, loading, error, refetch } = useQuery(
     () => getFullPropertyTree(orgId!),
     [orgId]
@@ -921,13 +921,15 @@ export default function BuildingSetup() {
     return (
       <>
         <EmptyState icon={Building2} title="No Buildings Yet" description="Add your first building to get started" />
-        <button
-          onClick={() => setShowAddBuilding(true)}
-          className="w-full mt-4 flex items-center justify-center gap-2 py-4 rounded-2xl border-2 border-dashed border-slate-200 text-sm font-semibold text-slate-400 hover:border-primary hover:text-primary active:bg-primary/5 transition-all"
-        >
-          <Plus className="w-5 h-5" />
-          Add Building
-        </button>
+        {isMaster && (
+          <button
+            onClick={() => setShowAddBuilding(true)}
+            className="w-full mt-4 flex items-center justify-center gap-2 py-4 rounded-2xl border-2 border-dashed border-slate-200 text-sm font-semibold text-slate-400 hover:border-primary hover:text-primary active:bg-primary/5 transition-all"
+          >
+            <Plus className="w-5 h-5" />
+            Add Building
+          </button>
+        )}
         {showAddBuilding && <AddBuildingModal onClose={() => setShowAddBuilding(false)} onSave={handleCreateBuilding} />}
       </>
     )
@@ -1123,13 +1125,15 @@ export default function BuildingSetup() {
       })}
 
       {/* Add New Building Button */}
-      <button
-        onClick={() => setShowAddBuilding(true)}
-        className="w-full mt-4 flex items-center justify-center gap-2 py-4 rounded-2xl border-2 border-dashed border-slate-200 text-sm font-semibold text-slate-400 hover:border-primary hover:text-primary active:bg-primary/5 transition-all"
-      >
-        <Plus className="w-5 h-5" />
-        Add Another Building
-      </button>
+      {isMaster && (
+        <button
+          onClick={() => setShowAddBuilding(true)}
+          className="w-full mt-4 flex items-center justify-center gap-2 py-4 rounded-2xl border-2 border-dashed border-slate-200 text-sm font-semibold text-slate-400 hover:border-primary hover:text-primary active:bg-primary/5 transition-all"
+        >
+          <Plus className="w-5 h-5" />
+          Add Another Building
+        </button>
+      )}
 
       {/* Modals */}
       {showAddBuilding && (

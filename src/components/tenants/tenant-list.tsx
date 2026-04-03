@@ -13,6 +13,7 @@ import {
   Users,
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
+import { useBuilding } from '@/lib/building-context'
 import { useQuery } from '@/lib/hooks/use-query'
 import { getActiveOccupancies } from '@/lib/services/tenants'
 import { ListSkeleton, EmptyState } from '@/components/loading-skeleton'
@@ -27,12 +28,13 @@ interface OccupancyWithJoins extends Occupancy {
 
 export default function TenantList() {
   const { orgId } = useAuth()
+  const { selectedBuildingId } = useBuilding()
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<FilterType>('all')
 
   const { data: occupancies, loading } = useQuery(
-    () => getActiveOccupancies(orgId!),
-    [orgId]
+    () => getActiveOccupancies(orgId!, selectedBuildingId),
+    [orgId, selectedBuildingId]
   )
 
   if (loading) {

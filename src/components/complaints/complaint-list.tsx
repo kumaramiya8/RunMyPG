@@ -15,6 +15,7 @@ import {
   Loader2,
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
+import { useBuilding } from '@/lib/building-context'
 import { useQuery } from '@/lib/hooks/use-query'
 import { getComplaints } from '@/lib/services/complaints'
 import { ListSkeleton, CardSkeleton } from '@/components/loading-skeleton'
@@ -64,12 +65,13 @@ function timeAgo(dateStr: string): string {
 
 export default function ComplaintList() {
   const { orgId } = useAuth()
+  const { selectedBuildingId } = useBuilding()
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
 
   const { data: complaints, loading } = useQuery(
-    () => getComplaints(orgId!),
-    [orgId]
+    () => getComplaints(orgId!, selectedBuildingId),
+    [orgId, selectedBuildingId]
   )
 
   if (!orgId || loading) {

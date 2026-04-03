@@ -5,6 +5,7 @@ import { Bell } from 'lucide-react'
 import Link from 'next/link'
 import { LogoIcon } from './logo'
 import { useAuth } from '@/lib/auth-context'
+import { BuildingSelectorCompact } from './building-selector'
 import { supabase } from '@/lib/supabase'
 
 export default function MobileHeader() {
@@ -30,7 +31,7 @@ export default function MobileHeader() {
           <LogoIcon size={32} />
           <div>
             <h1 className="text-sm font-bold text-slate-900 leading-tight">RunMyPG</h1>
-            <p className="text-[10px] text-slate-400 font-medium">{orgName || 'My Property'}</p>
+            <BuildingSelectorCompact />
           </div>
         </div>
 

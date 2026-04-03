@@ -40,11 +40,26 @@ export async function getBeds(roomId: string) {
   return data
 }
 
-export async function getFullPropertyTree(orgId: string) {
-  const { data: buildings, error: bErr } = await supabase
+// ── Building entity IDs helper ─────────────────────────────────────
+
+export async function getBuildingEntityIds(buildingId: string) {
+  const { data } = await supabase.rpc('get_building_entity_ids', { p_building_id: buildingId })
+  return data as { floor_ids: string[]; room_ids: string[]; bed_ids: string[] } | null
+}
+
+// ── Full property tree ─────────────────────────────────────────────
+
+export async function getFullPropertyTree(orgId: string, buildingId?: string | null) {
+  let buildingsQuery = supabase
     .from('buildings')
     .select('*')
     .eq('org_id', orgId)
+
+  if (buildingId) {
+    buildingsQuery = buildingsQuery.eq('id', buildingId)
+  }
+
+  const { data: buildings, error: bErr } = await buildingsQuery
 
   if (bErr) throw bErr
   if (!buildings?.length) return { buildings: [], floors: [], rooms: [], beds: [] }

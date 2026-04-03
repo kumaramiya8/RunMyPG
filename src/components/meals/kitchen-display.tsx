@@ -11,6 +11,7 @@ import {
   Clock,
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
+import { useBuilding } from '@/lib/building-context'
 import { useQuery } from '@/lib/hooks/use-query'
 import { getActiveOccupancies } from '@/lib/services/tenants'
 import { getMealOptouts } from '@/lib/services/meals'
@@ -32,6 +33,7 @@ function getCurrentMeal(): MealType {
 
 export default function KitchenDisplay() {
   const { orgId } = useAuth()
+  const { selectedBuildingId } = useBuilding()
   const [currentTime, setCurrentTime] = useState(new Date())
   const [activeMeal, setActiveMeal] = useState<MealType>(getCurrentMeal())
 
@@ -43,13 +45,13 @@ export default function KitchenDisplay() {
   const dateStr = currentTime.toISOString().split('T')[0]
 
   const { data: occupancies } = useQuery(
-    () => getActiveOccupancies(orgId!),
-    [orgId]
+    () => getActiveOccupancies(orgId!, selectedBuildingId),
+    [orgId, selectedBuildingId]
   )
 
   const { data: optoutsData } = useQuery(
-    () => getMealOptouts(orgId!, dateStr),
-    [orgId, dateStr]
+    () => getMealOptouts(orgId!, dateStr, selectedBuildingId),
+    [orgId, dateStr, selectedBuildingId]
   )
 
   // Build opt-out sets from real data

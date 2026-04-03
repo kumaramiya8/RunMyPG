@@ -22,6 +22,7 @@ import {
   Users,
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
+import { useBuilding } from '@/lib/building-context'
 import { useQuery } from '@/lib/hooks/use-query'
 import { getFinancialSummary, getInvoices } from '@/lib/services/billing'
 import { CardSkeleton, ListSkeleton } from '@/components/loading-skeleton'
@@ -62,15 +63,16 @@ const categoryColors: Record<string, string> = {
 
 export default function MonthlyReport() {
   const { orgId } = useAuth()
+  const { selectedBuildingId } = useBuilding()
 
   const { data: summary, loading: summaryLoading } = useQuery(
-    () => getFinancialSummary(orgId!),
-    [orgId]
+    () => getFinancialSummary(orgId!, selectedBuildingId),
+    [orgId, selectedBuildingId]
   )
 
   const { data: invoices, loading: invoicesLoading } = useQuery(
-    () => getInvoices(orgId!),
-    [orgId]
+    () => getInvoices(orgId!, selectedBuildingId),
+    [orgId, selectedBuildingId]
   )
 
   if (!orgId || summaryLoading || invoicesLoading) {

@@ -16,6 +16,7 @@ import {
   X,
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
+import { useBuilding } from '@/lib/building-context'
 import { useQuery, useMutation } from '@/lib/hooks/use-query'
 import { getActiveOccupancies } from '@/lib/services/tenants'
 import { getMealOptouts, toggleMealOptout } from '@/lib/services/meals'
@@ -45,6 +46,7 @@ function formatDisplayDate(date: Date): string {
 
 export default function MealDashboard() {
   const { orgId } = useAuth()
+  const { selectedBuildingId } = useBuilding()
   const [selectedDate, setSelectedDate] = useState(new Date())
   const [selectedMeal, setSelectedMeal] = useState<MealType>('dinner')
   const [search, setSearch] = useState('')
@@ -52,13 +54,13 @@ export default function MealDashboard() {
   const dateStr = formatDate(selectedDate)
 
   const { data: occupancies, loading: occLoading } = useQuery(
-    () => getActiveOccupancies(orgId!),
-    [orgId]
+    () => getActiveOccupancies(orgId!, selectedBuildingId),
+    [orgId, selectedBuildingId]
   )
 
   const { data: optoutsData, loading: optLoading, refetch: refetchOptouts } = useQuery(
-    () => getMealOptouts(orgId!, dateStr),
-    [orgId, dateStr]
+    () => getMealOptouts(orgId!, dateStr, selectedBuildingId),
+    [orgId, dateStr, selectedBuildingId]
   )
 
   const toggleMut = useMutation(toggleMealOptout)

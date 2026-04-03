@@ -1,4 +1,5 @@
 import { supabase } from '../supabase'
+import { getBuildingEntityIds } from './property'
 
 export async function getTenants(orgId: string) {
   const { data, error } = await supabase
@@ -20,7 +21,7 @@ export async function getTenantById(tenantId: string) {
   return data
 }
 
-export async function getActiveOccupancies(orgId: string) {
+export async function getActiveOccupancies(orgId: string, buildingId?: string | null) {
   // First get tenant IDs for this org, then get their occupancies
   const { data: tenants } = await supabase
     .from('tenants')
@@ -31,11 +32,20 @@ export async function getActiveOccupancies(orgId: string) {
 
   const tenantIds = tenants.map((t) => t.id)
 
-  const { data, error } = await supabase
+  let query = supabase
     .from('occupancies')
     .select('*, tenant:tenants(*), bed:beds(*, room:rooms(*))')
     .in('tenant_id', tenantIds)
     .neq('status', 'checked_out')
+
+  // If buildingId is set, filter by bed IDs belonging to that building
+  if (buildingId) {
+    const entityIds = await getBuildingEntityIds(buildingId)
+    if (!entityIds?.bed_ids?.length) return []
+    query = query.in('bed_id', entityIds.bed_ids)
+  }
+
+  const { data, error } = await query
   if (error) throw error
   return data
 }
@@ -199,7 +209,7 @@ export async function checkIn(
       recipient_type: 'tenant',
       recipient_id: newTenant.id,
       message_type: 'announcement',
-      content: `Welcome! You have been checked in. Monthly rent: ₹${rent.monthlyRent.toLocaleString('en-IN')}. Deposit paid: ₹${rent.depositAmount.toLocaleString('en-IN')}.${lockinMonths > 0 ? ` Lock-in: ${lockinMonths} months.` : ''}`,
+      content: `Welcome! You have been checked in. Monthly rent: \u20B9${rent.monthlyRent.toLocaleString('en-IN')}. Deposit paid: \u20B9${rent.depositAmount.toLocaleString('en-IN')}.${lockinMonths > 0 ? ` Lock-in: ${lockinMonths} months.` : ''}`,
       sent_at: new Date().toISOString(),
       delivery_status: 'delivered',
     })

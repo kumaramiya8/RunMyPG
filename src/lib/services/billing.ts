@@ -1,13 +1,28 @@
 import { supabase } from '../supabase'
+import { getBuildingEntityIds } from './property'
 
 // ─── Invoices ──────────────────────────────────────────────────────
 
-export async function getInvoices(orgId: string) {
-  const { data, error } = await supabase
+export async function getInvoices(orgId: string, buildingId?: string | null) {
+  let query = supabase
     .from('invoices')
     .select('*, occupancy:occupancies(*, tenant:tenants(*), bed:beds(*, room:rooms(*)))')
     .eq('org_id', orgId)
     .order('created_at', { ascending: false })
+
+  if (buildingId) {
+    const entityIds = await getBuildingEntityIds(buildingId)
+    if (!entityIds?.bed_ids?.length) return []
+    // Filter invoices through occupancies that have beds in this building
+    const { data: occupancyIds } = await supabase
+      .from('occupancies')
+      .select('id')
+      .in('bed_id', entityIds.bed_ids)
+    if (!occupancyIds?.length) return []
+    query = query.in('occupancy_id', occupancyIds.map((o) => o.id))
+  }
+
+  const { data, error } = await query
   if (error) throw error
   return data
 }
@@ -216,12 +231,18 @@ export async function getPaymentsForOccupancy(occupancyId: string) {
 
 // ─── Expenses ──────────────────────────────────────────────────────
 
-export async function getExpenses(orgId: string) {
-  const { data, error } = await supabase
+export async function getExpenses(orgId: string, buildingId?: string | null) {
+  let query = supabase
     .from('expenses')
     .select('*')
     .eq('org_id', orgId)
     .order('expense_date', { ascending: false })
+
+  if (buildingId) {
+    query = query.eq('building_id', buildingId)
+  }
+
+  const { data, error } = await query
   if (error) throw error
   return data
 }
@@ -245,11 +266,55 @@ export async function createExpense(
 
 // ─── Financial Summary ─────────────────────────────────────────────
 
-export async function getFinancialSummary(orgId: string) {
+export async function getFinancialSummary(orgId: string, buildingId?: string | null) {
+  let invoiceQuery = supabase.from('invoices').select('*').eq('org_id', orgId)
+  let expenseQuery = supabase.from('expenses').select('*').eq('org_id', orgId)
+  let paymentQuery = supabase.from('payments').select('*').eq('org_id', orgId)
+
+  if (buildingId) {
+    // Filter expenses directly
+    expenseQuery = expenseQuery.eq('building_id', buildingId)
+
+    // Filter invoices and payments through occupancies in this building
+    const entityIds = await getBuildingEntityIds(buildingId)
+    if (!entityIds?.bed_ids?.length) {
+      return {
+        totalRentExpected: 0, rentCollected: 0, rentPending: 0, rentOverdue: 0,
+        totalExpenses: 0, netProfit: 0, totalPayments: 0, depositCollected: 0, advanceCollected: 0,
+        expensesByCategory: {} as Record<string, number>, invoices: [] as any[], expenses: [] as any[], payments: [] as any[],
+      }
+    }
+
+    const { data: occupancyData } = await supabase
+      .from('occupancies')
+      .select('id')
+      .in('bed_id', entityIds.bed_ids)
+    const occupancyIds = (occupancyData || []).map((o) => o.id)
+
+    if (occupancyIds.length > 0) {
+      invoiceQuery = invoiceQuery.in('occupancy_id', occupancyIds)
+      paymentQuery = paymentQuery.in('occupancy_id', occupancyIds)
+    } else {
+      // No occupancies in this building, return empty financial data with expenses only
+      const expensesRes = await expenseQuery
+      const expenses = expensesRes.data || []
+      const totalExpenses = expenses.reduce((s, exp) => s + Number(exp.amount), 0)
+      const expensesByCategory: Record<string, number> = {}
+      expenses.forEach((exp) => {
+        expensesByCategory[exp.category] = (expensesByCategory[exp.category] || 0) + Number(exp.amount)
+      })
+      return {
+        totalRentExpected: 0, rentCollected: 0, rentPending: 0, rentOverdue: 0,
+        totalExpenses, netProfit: -totalExpenses, totalPayments: 0, depositCollected: 0, advanceCollected: 0,
+        expensesByCategory, invoices: [] as any[], expenses, payments: [] as any[],
+      }
+    }
+  }
+
   const [invoicesRes, expensesRes, paymentsRes] = await Promise.all([
-    supabase.from('invoices').select('*').eq('org_id', orgId),
-    supabase.from('expenses').select('*').eq('org_id', orgId),
-    supabase.from('payments').select('*').eq('org_id', orgId),
+    invoiceQuery,
+    expenseQuery,
+    paymentQuery,
   ])
 
   const invoices = invoicesRes.data || []

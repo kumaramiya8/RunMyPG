@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { LogoFull } from './logo'
 import { useAuth } from '@/lib/auth-context'
+import BuildingSelector from './building-selector'
 import {
   LayoutDashboard,
   BedDouble,
@@ -101,6 +102,9 @@ export default function Sidebar() {
       <div className="flex items-center h-16 px-4 border-b border-slate-200">
         <LogoFull className="h-10 w-auto" />
       </div>
+
+      {/* Building Selector */}
+      <BuildingSelector />
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto py-4 px-3 scroll-touch">

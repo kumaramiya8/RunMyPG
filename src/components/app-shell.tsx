@@ -2,6 +2,7 @@
 
 import { usePathname } from 'next/navigation'
 import { AuthProvider, useAuth } from '@/lib/auth-context'
+import { BuildingProvider } from '@/lib/building-context'
 import AuthGuard from './auth-guard'
 import Sidebar from './sidebar'
 import BottomNav from './bottom-nav'
@@ -37,9 +38,10 @@ function ShellContent({ children }: { children: React.ReactNode }) {
     )
   }
 
-  // Owner/Staff portal
+  // Owner/Staff portal — wrapped in BuildingProvider for property filtering
   return (
     <AuthGuard>
+      <BuildingProvider>
       <Sidebar />
       <div className="md:pl-64 flex flex-col min-h-full">
         <MobileHeader />
@@ -48,6 +50,7 @@ function ShellContent({ children }: { children: React.ReactNode }) {
         </main>
       </div>
       <BottomNav />
+      </BuildingProvider>
     </AuthGuard>
   )
 }

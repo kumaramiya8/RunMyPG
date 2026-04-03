@@ -31,6 +31,7 @@ import { useQuery } from '@/lib/hooks/use-query'
 import { supabase } from '@/lib/supabase'
 import { getTenantById, getActiveOccupancies, putOnNotice, cancelNotice } from '@/lib/services/tenants'
 import { getPaymentsForOccupancy, getInvoices } from '@/lib/services/billing'
+import { getFullPropertyTree } from '@/lib/services/property'
 import { notifyNoticePeriod } from '@/lib/services/notifications'
 import { ListSkeleton } from '@/components/loading-skeleton'
 import type { Occupancy, Tenant, Bed, Room, Invoice } from '@/lib/types'
@@ -80,7 +81,12 @@ export default function TenantProfile({ tenantId }: { tenantId: string }) {
     [orgId]
   )
 
-  const loading = tenantLoading || occLoading
+  const { data: propertyTree, loading: propLoading } = useQuery(
+    () => (orgId ? getFullPropertyTree(orgId) : Promise.resolve(null)),
+    [orgId]
+  )
+
+  const loading = tenantLoading || occLoading || propLoading
 
   if (loading) {
     return <ListSkeleton rows={4} />
@@ -101,6 +107,15 @@ export default function TenantProfile({ tenantId }: { tenantId: string }) {
   const occupancy = occupancies.find((o) => o.tenant_id === tenantId)
   const bed = occupancy?.bed
   const room = bed?.room
+
+  // Resolve building name from property tree: bed -> room -> floor -> building
+  const buildingName = (() => {
+    if (!room || !propertyTree) return null
+    const floor = propertyTree.floors?.find((f: any) => f.id === room.floor_id)
+    if (!floor) return null
+    const building = propertyTree.buildings?.find((b: any) => b.id === floor.building_id)
+    return building?.name || null
+  })()
 
   return (
     <div className="space-y-4">
@@ -130,7 +145,7 @@ export default function TenantProfile({ tenantId }: { tenantId: string }) {
         </div>
         {room && bed && (
           <p className="text-xs text-slate-500 mt-2">
-            {room.name} &mdash; {bed.bed_number}
+            {buildingName ? `${buildingName} \u2022 ` : ''}{room.name} &mdash; {bed.bed_number}
           </p>
         )}
 

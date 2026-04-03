@@ -14,6 +14,7 @@ import {
   HelpCircle,
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
+import { useBuilding } from '@/lib/building-context'
 import { useQuery } from '@/lib/hooks/use-query'
 import { getExpenses } from '@/lib/services/billing'
 import { ListSkeleton, CardSkeleton } from '@/components/loading-skeleton'
@@ -50,11 +51,12 @@ type FilterCat = 'all' | string
 
 export default function ExpenseList() {
   const { orgId } = useAuth()
+  const { selectedBuildingId } = useBuilding()
   const [filter, setFilter] = useState<FilterCat>('all')
 
   const { data: expenses, loading } = useQuery(
-    () => getExpenses(orgId!),
-    [orgId]
+    () => getExpenses(orgId!, selectedBuildingId),
+    [orgId, selectedBuildingId]
   )
 
   if (!orgId || loading) {

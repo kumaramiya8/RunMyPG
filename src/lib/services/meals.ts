@@ -1,11 +1,30 @@
 import { supabase } from '../supabase'
+import { getBuildingEntityIds } from './property'
 
-export async function getMealOptouts(orgId: string, date: string) {
-  const { data, error } = await supabase
+export async function getMealOptouts(orgId: string, date: string, buildingId?: string | null) {
+  let query = supabase
     .from('meal_optouts')
     .select('*')
     .eq('org_id', orgId)
     .eq('meal_date', date)
+
+  if (buildingId) {
+    // Get tenant IDs from building's occupancies to filter optouts
+    const entityIds = await getBuildingEntityIds(buildingId)
+    if (!entityIds?.bed_ids?.length) return []
+
+    const { data: occupancies } = await supabase
+      .from('occupancies')
+      .select('tenant_id')
+      .in('bed_id', entityIds.bed_ids)
+      .neq('status', 'checked_out')
+
+    if (!occupancies?.length) return []
+    const tenantIds = occupancies.map((o) => o.tenant_id)
+    query = query.in('tenant_id', tenantIds)
+  }
+
+  const { data, error } = await query
   if (error) throw error
   return data
 }

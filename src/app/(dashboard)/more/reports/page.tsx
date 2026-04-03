@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { ArrowLeft, FileBarChart, Download, ChevronDown, ChevronUp } from 'lucide-react'
 import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
+import { useBuilding } from '@/lib/building-context'
 import { useQuery } from '@/lib/hooks/use-query'
 import { getFinancialSummary, getInvoices, getExpenses } from '@/lib/services/billing'
 import { getComplaints } from '@/lib/services/complaints'
@@ -75,18 +76,19 @@ function DataTable({ headers, rows }: { headers: string[]; rows: React.ReactNode
 
 export default function ReportsPage() {
   const { orgId } = useAuth()
+  const { selectedBuildingId } = useBuilding()
   const [expandedReports, setExpandedReports] = useState<Record<string, boolean>>({})
 
   const toggleReport = (title: string) => {
     setExpandedReports((prev) => ({ ...prev, [title]: !prev[title] }))
   }
 
-  const { data: summary, loading: l1 } = useQuery(() => getFinancialSummary(orgId!), [orgId])
-  const { data: invoices, loading: l2 } = useQuery(() => getInvoices(orgId!), [orgId])
-  const { data: complaints, loading: l3 } = useQuery(() => getComplaints(orgId!), [orgId])
-  const { data: occupancies, loading: l4 } = useQuery(() => getActiveOccupancies(orgId!), [orgId])
-  const { data: property, loading: l5 } = useQuery(() => getFullPropertyTree(orgId!), [orgId])
-  const { data: expenses, loading: l6 } = useQuery(() => getExpenses(orgId!), [orgId])
+  const { data: summary, loading: l1 } = useQuery(() => getFinancialSummary(orgId!, selectedBuildingId), [orgId, selectedBuildingId])
+  const { data: invoices, loading: l2 } = useQuery(() => getInvoices(orgId!, selectedBuildingId), [orgId, selectedBuildingId])
+  const { data: complaints, loading: l3 } = useQuery(() => getComplaints(orgId!, selectedBuildingId), [orgId, selectedBuildingId])
+  const { data: occupancies, loading: l4 } = useQuery(() => getActiveOccupancies(orgId!, selectedBuildingId), [orgId, selectedBuildingId])
+  const { data: property, loading: l5 } = useQuery(() => getFullPropertyTree(orgId!, selectedBuildingId), [orgId, selectedBuildingId])
+  const { data: expenses, loading: l6 } = useQuery(() => getExpenses(orgId!, selectedBuildingId), [orgId, selectedBuildingId])
 
   const loading = l1 || l2 || l3 || l4 || l5 || l6
 
