@@ -21,6 +21,7 @@ interface Account {
   created_at: string
   tenant_count: number
   bed_count: number
+  building_count: number
 }
 
 export default function AdminDashboard() {
@@ -51,9 +52,14 @@ export default function AdminDashboard() {
 
   const fetchAccounts = useCallback(async () => {
     setLoading(true)
-    const { data, error } = await supabase.rpc('get_all_accounts')
-    if (!error && data) {
-      setAccounts(data as Account[])
+    try {
+      const res = await fetch('/api/admin/list-accounts')
+      const data = await res.json()
+      if (Array.isArray(data)) {
+        setAccounts(data)
+      }
+    } catch (err) {
+      console.error('Error fetching accounts:', err)
     }
     setLoading(false)
   }, [])
@@ -180,8 +186,8 @@ export default function AdminDashboard() {
           </div>
           <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-100">
             <BedDouble className="w-5 h-5 text-indigo-500 mb-2" />
-            <p className="text-2xl font-bold text-slate-900">{accounts.reduce((s, a) => s + a.bed_count, 0)}</p>
-            <p className="text-xs text-slate-500">Total Beds</p>
+            <p className="text-2xl font-bold text-slate-900">{accounts.reduce((s, a) => s + (a.building_count || 0), 0)}</p>
+            <p className="text-xs text-slate-500">Total Properties</p>
           </div>
           <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-100 hidden md:block">
             <Users className="w-5 h-5 text-emerald-500 mb-2" />
@@ -239,7 +245,7 @@ export default function AdminDashboard() {
                     </span>
                   </div>
                   <div className="flex items-center gap-3 mt-1 text-[11px] text-slate-400">
-                    <span>{account.bed_count} beds</span>
+                    <span>{account.building_count || 0} properties</span>
                     <span>{account.tenant_count} tenants</span>
                     <span>Created {new Date(account.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
                   </div>
